@@ -92,3 +92,8 @@ python 7_Demo\dashboard\src\server.py --twin-bridge --port COM5 --host 127.0.0.1
 
 Board build/flash instructions:
 - `3_Firmware/Build_Instructions.md`
+## Glimpse
+
+
+https://github.com/user-attachments/assets/6ddb5324-144d-42f2-9214-79260a99c494
+
