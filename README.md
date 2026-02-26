@@ -42,3 +42,8 @@ Most Battery Management Systems (BMS) rely only on temperature sensors for therm
 
 ## 6. Demo Video
 [Insert public video link here]
+
+## 7. Hardware Deployment Quick Links
+- Firmware build + flash guide: `3_Firmware/Build_Instructions.md`
+- Friend handoff runbook: `7_Demo/Hardware_Handoff_Runbook.md`
+- One-command twin->board launcher: `7_Demo/run_twin_bridge.ps1`

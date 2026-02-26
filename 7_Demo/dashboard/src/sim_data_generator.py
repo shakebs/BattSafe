@@ -32,38 +32,50 @@ from typing import Iterator
 class SensorReading:
     """One snapshot of all sensor values at a point in time.
     
-    This matches the data the VSDSquadron ULTRA will send in each
-    UART packet to the dashboard.
+    Full-pack edition: carries data for 8 modules (16 NTCs, 104 groups)
+    plus pack-level sensors. Legacy 4-cell fields still present for
+    backward compat with the existing dashboard frontend.
     """
     timestamp_ms: int       # milliseconds since boot
     
-    # Electrical (from INA219)
-    voltage_v: float        # battery pack voltage (4S nominal ~14.8V)
-    current_a: float        # load current in amps
-    r_internal_mohm: float  # computed internal resistance in milliohms
+    # Electrical — full pack (104S8P, ~332.8V, 120Ah)
+    voltage_v: float        # pack voltage (~332.8V)
+    current_a: float        # pack current in amps
+    r_internal_mohm: float  # group internal resistance in milliohms
     
-    # Thermal (from NTC thermistors via MUX)
-    temp_cell1_c: float     # cell 1 surface temperature
-    temp_cell2_c: float     # cell 2 surface temperature
-    temp_cell3_c: float     # cell 3 surface temperature
-    temp_cell4_c: float     # cell 4 surface temperature
-    temp_ambient_c: float   # ambient/enclosure temperature
+    # Legacy Thermal (kept for backward compat — first 4 module NTC1s)
+    temp_cell1_c: float     # Module 1 NTC1
+    temp_cell2_c: float     # Module 2 NTC1
+    temp_cell3_c: float     # Module 3 NTC1
+    temp_cell4_c: float     # Module 4 NTC1
+    temp_ambient_c: float   # ambient temperature
     
-    # Gas & Pressure (from BME680)
-    gas_ratio: float        # gas_current / gas_baseline (1.0 = clean, <0.7 = warning)
-    pressure_delta_hpa: float  # change from baseline pressure in hPa
-    humidity_pct: float     # relative humidity percentage
+    # Gas & Pressure — single-value legacy (worst-case of dual sensors)
+    gas_ratio: float        # min(gas1, gas2)
+    pressure_delta_hpa: float  # max(p1, p2)
+    humidity_pct: float
     
-    # Mechanical (from FSR402)
-    swelling_pct: float     # 0 = no force, 100 = max deformation
+    # Mechanical — single-value legacy (max across 8 modules)
+    swelling_pct: float
     
-    # Derived flags (computed by correlation engine)
-    short_circuit: bool     # true if short-circuit detected
-    dt_dt_max: float = 0.0  # max rate of temperature rise (°C/s)
+    # Derived flags
+    short_circuit: bool
+    dt_dt_max: float = 0.0
     
     # State machine output
     active_categories: list = field(default_factory=list)
     system_state: str = "NORMAL"
+    
+    # Full-pack data (new)
+    modules: list = field(default_factory=list)  # list of dicts with ntc1, ntc2, swelling_pct, etc.
+    gas_ratio_1: float = 1.0
+    gas_ratio_2: float = 1.0
+    pressure_delta_1: float = 0.0
+    pressure_delta_2: float = 0.0
+    hotspot_module: int = 0     # 1-based module index
+    risk_pct: int = 0           # 0-100
+    cascade_stage: str = 'Normal'
+    temp_cells_c: list = field(default_factory=lambda: [25.0]*4)  # backward compat
 
 
 @dataclass
@@ -82,22 +94,25 @@ class CorrelationEngineState:
 # ---------------------------------------------------------------------------
 
 THRESHOLDS = {
-    "temp_warning_c": 55.0,         # cell temp above this = thermal anomaly
-    "temp_critical_c": 70.0,        # cell temp critical
-    "dt_dt_warning_c_per_s": 2.0,   # rate of rise > 2°C/s = anomaly
-    "delta_t_ambient_warning": 20.0, # ΔT above ambient >= this = thermal anomaly
-    "gas_warning_ratio": 0.70,      # gas ratio below this = gas anomaly
-    "gas_critical_ratio": 0.40,     # gas ratio critical
-    "pressure_warning_hpa": 5.0,    # pressure rise above this = pressure anomaly
-    "pressure_critical_hpa": 15.0,  # pressure rise critical
-    "swelling_warning_pct": 30.0,   # swelling above this = mechanical anomaly
-    "current_warning_a": 8.0,       # current above this = electrical anomaly
-    "current_short_a": 15.0,        # current above this = short circuit
-    "voltage_low_v": 12.0,          # pack voltage below this = electrical anomaly
-    "r_int_warning_mohm": 100.0,    # internal resistance above this = electrical anomaly
-    "temp_emergency_c": 80.0,       # direct emergency
+    "temp_warning_c": 55.0,          # NTC temp above this = thermal anomaly
+    "temp_critical_c": 65.0,         # NTC temp critical
+    "dt_dt_warning_c_per_s": 0.5/60, # 0.5°C/min warning
+    "delta_t_ambient_warning": 20.0,  # ΔT above ambient >= this = thermal
+    "inter_module_dt_warn": 5.0,      # ΔT between modules warning
+    "intra_module_dt_warn": 3.0,      # ΔT within module (NTC1 vs NTC2)
+    "gas_warning_ratio": 0.70,       # gas ratio below this = gas anomaly
+    "gas_critical_ratio": 0.40,      # gas ratio critical
+    "pressure_warning_hpa": 2.0,     # pressure rise warning
+    "pressure_critical_hpa": 5.0,    # pressure rise critical
+    "swelling_warning_pct": 3.0,     # swelling above this = anomaly
+    "current_warning_a": 180.0,      # >1.5C = 180A warning (full pack)
+    "current_short_a": 350.0,        # short circuit
+    "voltage_low_v": 260.0,          # pack voltage low (full pack)
+    "voltage_high_v": 380.0,         # pack voltage high
+    "r_int_warning_mohm": 0.55,      # group R_int warning
+    "temp_emergency_c": 80.0,        # direct emergency
     "dt_dt_emergency_c_per_s": 5.0 / 60.0,  # 5°C/min
-    "current_emergency_a": 20.0,    # prototype-scaled direct emergency
+    "current_emergency_a": 500.0,    # full-pack direct emergency
 }
 
 
@@ -118,43 +133,67 @@ def _noise(base: float, noise_pct: float = 0.5) -> float:
 def evaluate_categories(reading: SensorReading) -> list:
     """Determine which anomaly categories are active.
     
-    This is the same logic that runs on the VSDSquadron ULTRA.
-    Categories: electrical, thermal, gas, pressure, swelling
+    Full-pack version: checks 8 modules' NTCs, dual gas sensors,
+    dual pressure sensors, and 8 swelling sensors.
     """
     cats = []
     
-    # Electrical: high current, low voltage, or high internal resistance
-    if (reading.current_a > THRESHOLDS["current_warning_a"] or
+    # Electrical: high current, voltage bounds, or high R_int
+    abs_current = abs(reading.current_a)
+    if (abs_current > THRESHOLDS["current_warning_a"] or
         reading.voltage_v < THRESHOLDS["voltage_low_v"] or
+        reading.voltage_v > THRESHOLDS.get("voltage_high_v", 999) or
         reading.r_internal_mohm > THRESHOLDS["r_int_warning_mohm"]):
         cats.append("electrical")
     
-    # Thermal: any cell above warning threshold, high dT/dt, OR ambient-compensated
-    cell_temps = [reading.temp_cell1_c, reading.temp_cell2_c,
-                  reading.temp_cell3_c, reading.temp_cell4_c]
-    if any(t > THRESHOLDS["temp_warning_c"] for t in cell_temps):
+    # Thermal: check NTCs from modules if available, else legacy
+    all_ntcs = []
+    if reading.modules:
+        for m in reading.modules:
+            ntc1 = m.get('ntc1', 25)
+            ntc2 = m.get('ntc2', 25)
+            all_ntcs.extend([ntc1, ntc2])
+    else:
+        all_ntcs = [reading.temp_cell1_c, reading.temp_cell2_c,
+                    reading.temp_cell3_c, reading.temp_cell4_c]
+    
+    if any(t > THRESHOLDS["temp_warning_c"] for t in all_ntcs):
         cats.append("thermal")
     if reading.dt_dt_max > THRESHOLDS["dt_dt_warning_c_per_s"]:
         if "thermal" not in cats:
             cats.append("thermal")
     
-    # Ambient-compensated thermal check (spec §3.3)
-    max_cell = max(cell_temps)
+    # Ambient-compensated thermal check
+    max_cell = max(all_ntcs) if all_ntcs else 25.0
     delta_t = max_cell - reading.temp_ambient_c
     if delta_t >= THRESHOLDS["delta_t_ambient_warning"]:
         if "thermal" not in cats:
             cats.append("thermal")
     
-    # Gas: VOC ratio dropped below warning
-    if reading.gas_ratio < THRESHOLDS["gas_warning_ratio"]:
+    # Inter-module ΔT detection
+    if len(all_ntcs) >= 4:
+        temp_spread = max(all_ntcs) - min(all_ntcs)
+        if temp_spread > THRESHOLDS.get("inter_module_dt_warn", 5.0):
+            if "thermal" not in cats:
+                cats.append("thermal")
+    
+    # Gas: worst-case of dual sensors
+    worst_gas = min(reading.gas_ratio_1, reading.gas_ratio_2) if reading.modules else reading.gas_ratio
+    if worst_gas < THRESHOLDS["gas_warning_ratio"]:
         cats.append("gas")
     
-    # Pressure: enclosure pressure rose above warning
-    if reading.pressure_delta_hpa > THRESHOLDS["pressure_warning_hpa"]:
+    # Pressure: worst-case of dual sensors
+    worst_pressure = max(reading.pressure_delta_1, reading.pressure_delta_2) if reading.modules else reading.pressure_delta_hpa
+    if worst_pressure > THRESHOLDS["pressure_warning_hpa"]:
         cats.append("pressure")
     
-    # Swelling: mechanical deformation detected
-    if reading.swelling_pct > THRESHOLDS["swelling_warning_pct"]:
+    # Swelling: any module above threshold
+    if reading.modules:
+        for m in reading.modules:
+            if m.get('swelling_pct', 0) > THRESHOLDS["swelling_warning_pct"]:
+                cats.append("swelling")
+                break
+    elif reading.swelling_pct > THRESHOLDS["swelling_warning_pct"]:
         cats.append("swelling")
     
     return cats
@@ -162,16 +201,18 @@ def evaluate_categories(reading: SensorReading) -> list:
 
 def is_emergency_direct(reading: SensorReading) -> bool:
     """Single-parameter direct emergency bypass (firmware parity)."""
-    max_temp = max(
-        reading.temp_cell1_c,
-        reading.temp_cell2_c,
-        reading.temp_cell3_c,
-        reading.temp_cell4_c,
-    )
+    all_ntcs = []
+    if reading.modules:
+        for m in reading.modules:
+            all_ntcs.extend([m.get('ntc1', 25), m.get('ntc2', 25)])
+    else:
+        all_ntcs = [reading.temp_cell1_c, reading.temp_cell2_c,
+                    reading.temp_cell3_c, reading.temp_cell4_c]
+    max_temp = max(all_ntcs) if all_ntcs else 25.0
     return (
         max_temp > THRESHOLDS["temp_emergency_c"]
         or reading.dt_dt_max > THRESHOLDS["dt_dt_emergency_c_per_s"]
-        or reading.current_a > THRESHOLDS["current_emergency_a"]
+        or abs(reading.current_a) > THRESHOLDS["current_emergency_a"]
     )
 
 

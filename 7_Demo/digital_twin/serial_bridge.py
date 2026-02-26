@@ -1,7 +1,15 @@
 """
-Battery Pack Digital Twin — Serial Bridge
-============================================
-Encodes simulation data into binary packets for VSDSquadron Ultra.
+Battery Pack Digital Twin — Serial Bridge (Full Pack Edition)
+================================================================
+Encodes 139-channel simulation data into multi-frame binary packets
+for the VSDSquadron Ultra.
+
+Multi-frame protocol:
+  Frame 0x01 (Pack):   Pack voltage, current, gas×2, pressure×2, coolant, etc.
+  Frame 0x02 (Module): Per-module NTC1/2, swelling, 13 group voltages (×8)
+
+Each frame: [0xBB][LEN][TYPE][payload][XOR_checksum]
+Total: 1 pack frame + 8 module frames = 9 frames per cycle
 """
 
 import struct
@@ -12,11 +20,26 @@ import queue
 import time
 from typing import Dict, Optional
 
-from digital_twin.config import SERIAL_BAUD_RATE, SERIAL_SYNC_BYTE, SERIAL_PAYLOAD_LEN
+from digital_twin.config import SERIAL_BAUD_RATE, NUM_MODULES, GROUPS_PER_MODULE
+
+# Protocol constants
+INPUT_SYNC = 0xBB
+PACK_FRAME_TYPE = 0x01
+MODULE_FRAME_TYPE = 0x02
+PACK_FRAME_SIZE = 30
+MODULE_FRAME_SIZE = 24
+
+
+def _xor_checksum(data: bytes) -> int:
+    """XOR all bytes for checksum."""
+    csum = 0
+    for b in data:
+        csum ^= b
+    return csum
 
 
 class SerialBridge:
-    """Encodes pack snapshot → binary packet → serial port."""
+    """Encodes pack snapshot → multi-frame binary → serial port."""
 
     def __init__(self, port: Optional[str] = None, baud: int = SERIAL_BAUD_RATE):
         self.port = port or self._auto_detect_port()
@@ -61,91 +84,129 @@ class SerialBridge:
             try:
                 self._send_queue.put_nowait(snapshot)
             except queue.Full:
-                pass  # Drop if queue full
+                pass
 
-    def encode_packet(self, snapshot: Dict) -> bytes:
-        """Encode snapshot into 20-byte input packet (0xBB sync) for the board.
+    def encode_all_frames(self, snapshot: Dict) -> bytes:
+        """Encode full 139-channel snapshot into 9 binary frames.
 
-        Maps 139-channel digital twin data to the 7 prototype sensor values
-        that the VSDSquadron firmware expects.
+        Returns concatenated bytes: 1 pack frame + 8 module frames.
         """
-        INPUT_SYNC = 0xBB
-        INPUT_LEN = 20
+        frames = bytearray()
+        frames.extend(self._encode_pack_frame(snapshot))
+        for m_idx in range(NUM_MODULES):
+            frames.extend(self._encode_module_frame(snapshot, m_idx))
+        return bytes(frames)
 
-        # Electrical — use pack-level voltage scaled to prototype range
-        # Digital twin: ~341V (104S), prototype expects ~14.8V (4S)
-        # Scale: V_proto = V_pack / 104 * 4 ≈ V_pack * 0.0385
-        pack_v = snapshot.get('pack_voltage', 341.0)
-        proto_v = pack_v * 4.0 / 104.0  # Scale to 4S
-        voltage_cv = int(proto_v * 100)
+    def _encode_pack_frame(self, snapshot: Dict) -> bytes:
+        """Encode pack-level data into a 30-byte frame."""
+        # Pack voltage in deci-volts
+        pack_v_dv = int(snapshot.get('pack_voltage', 332.8) * 10)
+        # Pack current in deci-amps
+        pack_i_da = int(snapshot.get('pack_current', 0.0) * 10)
+        # Ambient temp deci-°C
+        ambient_dt = int(snapshot.get('ambient_temp', 30.0) * 10)
+        # Coolant temps deci-°C
+        coolant_in_dt = int(snapshot.get('coolant_inlet', 25.0) * 10)
+        coolant_out_dt = int(snapshot.get('coolant_outlet', 27.0) * 10)
+        # Gas ratios ×100
+        gas1_cp = int(snapshot.get('gas_ratio_1', 1.0) * 100)
+        gas2_cp = int(snapshot.get('gas_ratio_2', 1.0) * 100)
+        # Pressure deltas in centi-hPa
+        p1_chpa = int(snapshot.get('pressure_delta_1', 0.0) * 100)
+        p2_chpa = int(snapshot.get('pressure_delta_2', 0.0) * 100)
+        # Humidity
+        humidity = int(snapshot.get('humidity', 50.0))
+        humidity = max(0, min(100, humidity))
+        # Isolation (MΩ × 10)
+        iso_mohm = int(snapshot.get('isolation_mohm', 500.0) * 10)
 
-        pack_i = snapshot.get('pack_current', 0.0)
-        current_ca = int(pack_i * 100)
-
-        # Thermal — pick module 1's NTC readings as representative
-        modules = snapshot.get('modules', [])
-        if modules:
-            m0 = modules[0]
-            temp1 = m0.get('temp_ntc1', 30.0)
-            temp2 = m0.get('temp_ntc2', 30.0)
-            # Use two more modules for spatial variation
-            m1 = modules[1] if len(modules) > 1 else m0
-            temp3 = m1.get('temp_ntc1', 30.0)
-            temp4 = m1.get('temp_ntc2', 30.0)
-        else:
-            temp1 = temp2 = temp3 = temp4 = 30.0
-
-        temp1_dt = int(temp1 * 10)
-        temp2_dt = int(temp2 * 10)
-        temp3_dt = int(temp3 * 10)
-        temp4_dt = int(temp4 * 10)
-
-        # Gas — average of two gas ratios
-        gas1 = snapshot.get('gas_ratio_1', 1.0)
-        gas2 = snapshot.get('gas_ratio_2', 1.0)
-        gas_ratio_cp = int(((gas1 + gas2) / 2.0) * 100)
-
-        # Pressure — average of two deltas
-        p1 = snapshot.get('pressure_delta_1', 0.0)
-        p2 = snapshot.get('pressure_delta_2', 0.0)
-        pressure_chpa = int(((p1 + p2) / 2.0) * 100)
-
-        # Swelling — use module 1's swelling percentage
-        if modules:
-            swelling = int(modules[0].get('swelling_pct', 0))
-        else:
-            swelling = 0
-        swelling = min(swelling, 100)
-
-        # Build payload (matching input_packet_t struct, little-endian)
-        payload = struct.pack('<HhhhhhHhB',
-            voltage_cv,       # uint16 voltage_cv
-            current_ca,       # int16  current_ca
-            temp1_dt,         # int16  temp1_dt
-            temp2_dt,         # int16  temp2_dt
-            temp3_dt,         # int16  temp3_dt
-            temp4_dt,         # int16  temp4_dt
-            gas_ratio_cp,     # uint16 gas_ratio_cp
-            pressure_chpa,    # int16  pressure_delta_chpa
-            swelling,         # uint8  swelling_pct
+        payload = struct.pack('<HhhhhhHHhhBH',
+            pack_v_dv,       # uint16 pack voltage deci-V
+            pack_i_da,       # int16  pack current deci-A
+            ambient_dt,      # int16  ambient temp deci-°C
+            coolant_in_dt,   # int16  coolant inlet deci-°C
+            coolant_out_dt,  # int16  coolant outlet deci-°C
+            0,               # int16  reserved
+            gas1_cp,         # uint16 gas ratio 1 ×100
+            gas2_cp,         # uint16 gas ratio 2 ×100
+            p1_chpa,         # int16  pressure Δ1 centi-hPa
+            p2_chpa,         # int16  pressure Δ2 centi-hPa
+            humidity,        # uint8  humidity %
+            iso_mohm,        # uint16 isolation MΩ×10
         )
 
-        # Frame: SYNC + LEN + PAYLOAD + CHECKSUM
-        frame_no_csum = struct.pack('BB', INPUT_SYNC, INPUT_LEN) + payload
-        checksum = 0
-        for b in frame_no_csum:
-            checksum ^= b
-        frame = frame_no_csum + struct.pack('B', checksum)
-        return frame
+        # Build frame: [sync][len][type][payload][checksum]
+        frame_no_csum = struct.pack('BBB', INPUT_SYNC, PACK_FRAME_SIZE,
+                                    PACK_FRAME_TYPE) + payload
+        csum = _xor_checksum(frame_no_csum)
+        return frame_no_csum + struct.pack('B', csum)
+
+    def _encode_module_frame(self, snapshot: Dict, module_idx: int) -> bytes:
+        """Encode per-module data into a 24-byte frame."""
+        modules = snapshot.get('modules', [])
+        if module_idx < len(modules):
+            mdata = modules[module_idx]
+        else:
+            mdata = {}
+
+        # NTC temperatures in deci-°C
+        ntc1_dt = int(mdata.get('temp_ntc1', 30.0) * 10)
+        ntc2_dt = int(mdata.get('temp_ntc2', 30.0) * 10)
+
+        # Swelling percentage
+        swelling = int(mdata.get('swelling_pct', 0.0))
+        swelling = max(0, min(100, swelling))
+
+        # Group voltages: base (mean) + 13 deltas
+        groups = mdata.get('groups', [])
+        if groups:
+            group_vs = [g.get('voltage', 3.20) for g in groups]
+        else:
+            group_vs = [3.20] * GROUPS_PER_MODULE
+
+        # Pad or trim to exactly 13
+        while len(group_vs) < GROUPS_PER_MODULE:
+            group_vs.append(3.20)
+        group_vs = group_vs[:GROUPS_PER_MODULE]
+
+        base_v_mv = int(sum(group_vs) / len(group_vs) * 1000)
+        deltas = []
+        for v in group_vs:
+            d = int(v * 1000) - base_v_mv
+            d = max(-127, min(127, d))
+            deltas.append(d)
+
+        # Pack payload
+        payload = struct.pack('<BhhBH',
+            module_idx,      # uint8  module index (0-7)
+            ntc1_dt,         # int16  NTC1 deci-°C
+            ntc2_dt,         # int16  NTC2 deci-°C
+            swelling,        # uint8  swelling %
+            base_v_mv,       # uint16 base voltage mV
+        )
+        # Add 13 delta bytes (int8)
+        for d in deltas:
+            payload += struct.pack('<b', d)
+
+        # Build frame
+        frame_no_csum = struct.pack('BBB', INPUT_SYNC, MODULE_FRAME_SIZE,
+                                    MODULE_FRAME_TYPE) + payload
+        csum = _xor_checksum(frame_no_csum)
+        return frame_no_csum + struct.pack('B', csum)
+
+    # Legacy API — encode old-style single packet (for backward compat)
+    def encode_packet(self, snapshot: Dict) -> bytes:
+        """Encode ALL frames for one snapshot cycle."""
+        return self.encode_all_frames(snapshot)
 
     def _send_loop(self):
         """Background send loop."""
         while self.is_connected:
             try:
                 snapshot = self._send_queue.get(timeout=1.0)
-                packet = self.encode_packet(snapshot)
+                frames = self.encode_all_frames(snapshot)
                 if self._serial and self._serial.is_open:
-                    self._serial.write(packet)
+                    self._serial.write(frames)
             except queue.Empty:
                 continue
             except Exception as e:

@@ -1,15 +1,19 @@
 /*
- * correlation_engine.c — Multi-Modal Correlation Engine (Implementation)
+ * correlation_engine.c — Multi-Modal Correlation Engine (Full Pack Edition)
  *
  * State transition logic:
  *
  *  NORMAL ──(1 cat)──> WARNING ──(2 cats)──> CRITICAL ──(countdown)──>
- * EMERGENCY ^                    |                     | | | |     (cats drop)
- * |                          | +── (0 cats, cooldown expired) ◄───────────+
- * [LATCHED]
+ * EMERGENCY ^                    |                     |
+ *           |     (cats drop)    |                     |
+ *           +── (0 cats, cooldown expired) <────────────+
+ *           [LATCHED]
  *
- * EMERGENCY is latched — once triggered, it stays until manually reset.
- * This is a safety design choice: you need a human to verify it's safe.
+ * EMERGENCY is latched, but it can auto-release after sustained nominal
+ * conditions. This keeps demo operation recoverable without manual board reset.
+ *
+ * Enhanced: Now tracks hotspot module, anomaly mask, risk factor, and
+ * cascade stage from the full-pack anomaly evaluation.
  */
 
 #include "correlation_engine.h"
@@ -29,19 +33,23 @@ static const char *STATE_NAMES[] = {
 void correlation_engine_init(correlation_engine_t *engine) {
   engine->current_state = STATE_NORMAL;
 
-  /* CRITICAL countdown: 20 cycles × 500ms = 10 seconds
-   * If 2 categories are active for 10 consecutive seconds,
-   * escalate to EMERGENCY. */
+  /* CRITICAL countdown: 20 cycles × 500ms = 10 seconds */
   engine->critical_countdown = 0;
   engine->critical_countdown_limit = 20;
 
-  /* De-escalation: 10 cycles × 500ms = 5 seconds
-   * Must remain at lower severity for 5 seconds before
-   * dropping the alert level. */
+  /* De-escalation: 10 cycles × 500ms = 5 seconds */
   engine->deescalation_counter = 0;
   engine->deescalation_limit = 10;
 
   engine->emergency_latched = false;
+  engine->emergency_recovery_counter = 0;
+  engine->emergency_recovery_limit = 10;
+
+  /* Hotspot / risk tracking */
+  engine->hotspot_module = 0;
+  engine->anomaly_modules_mask = 0;
+  engine->risk_factor = 0.0f;
+  engine->cascade_stage = 0;
 
   engine->total_evaluations = 0;
   engine->warning_count = 0;
@@ -57,8 +65,31 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
                                          const anomaly_result_t *anomaly) {
   engine->total_evaluations++;
 
-  /* If emergency is latched, stay there until manual reset */
+  /* Always update tracking fields from latest evaluation */
+  engine->hotspot_module = anomaly->hotspot_module;
+  engine->anomaly_modules_mask = anomaly->anomaly_modules_mask;
+  engine->risk_factor = anomaly->risk_factor;
+  engine->cascade_stage = anomaly->cascade_stage;
+
+  /* If emergency is latched, require sustained nominal readings to release */
   if (engine->emergency_latched) {
+    if (anomaly->is_short_circuit || anomaly->is_emergency_direct ||
+        anomaly->active_count > 0) {
+      engine->emergency_recovery_counter = 0;
+      engine->emergency_count++;
+      return STATE_EMERGENCY;
+    }
+
+    engine->emergency_recovery_counter++;
+    if (engine->emergency_recovery_counter >= engine->emergency_recovery_limit) {
+      engine->emergency_latched = false;
+      engine->emergency_recovery_counter = 0;
+      engine->current_state = STATE_NORMAL;
+      engine->deescalation_counter = 0;
+      engine->critical_countdown = 0;
+      return STATE_NORMAL;
+    }
+
     engine->emergency_count++;
     return STATE_EMERGENCY;
   }
@@ -69,16 +100,17 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
   if (anomaly->is_short_circuit) {
     engine->current_state = STATE_EMERGENCY;
     engine->emergency_latched = true;
+    engine->emergency_recovery_counter = 0;
     engine->emergency_count++;
     return STATE_EMERGENCY;
   }
 
   /* Emergency direct bypass (spec §4.3):
-   * Physics-based limits (T>80°C, dT/dt>5°C/min, current spike)
-   * bypass multi-parameter correlation entirely. */
+   * Physics-based limits (T>80°C, dT/dt>5°C/min, current spike) */
   if (anomaly->is_emergency_direct) {
     engine->current_state = STATE_EMERGENCY;
     engine->emergency_latched = true;
+    engine->emergency_recovery_counter = 0;
     engine->emergency_count++;
     return STATE_EMERGENCY;
   }
@@ -87,6 +119,7 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
   if (anomaly->active_count >= 3) {
     engine->current_state = STATE_EMERGENCY;
     engine->emergency_latched = true;
+    engine->emergency_recovery_counter = 0;
     engine->emergency_count++;
     return STATE_EMERGENCY;
   }
@@ -95,19 +128,18 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
 
   if (anomaly->active_count >= 2) {
     if (engine->current_state != STATE_CRITICAL) {
-      /* Just entered CRITICAL — start countdown */
       engine->current_state = STATE_CRITICAL;
       engine->critical_countdown = 0;
     }
 
     engine->critical_countdown++;
     engine->critical_count++;
-    engine->deescalation_counter = 0; /* Reset de-escalation */
+    engine->deescalation_counter = 0;
 
-    /* If CRITICAL persists long enough, escalate to EMERGENCY */
     if (engine->critical_countdown >= engine->critical_countdown_limit) {
       engine->current_state = STATE_EMERGENCY;
       engine->emergency_latched = true;
+      engine->emergency_recovery_counter = 0;
       engine->emergency_count++;
       return STATE_EMERGENCY;
     }
@@ -119,7 +151,7 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
 
   if (anomaly->active_count == 1) {
     engine->current_state = STATE_WARNING;
-    engine->critical_countdown = 0; /* Reset CRITICAL countdown */
+    engine->critical_countdown = 0;
     engine->deescalation_counter = 0;
     engine->warning_count++;
     return STATE_WARNING;
@@ -128,14 +160,12 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
   /* --- 0 categories: try to de-escalate --- */
 
   if (engine->current_state != STATE_NORMAL) {
-    /* Don't immediately drop — wait for sustained normal readings */
     engine->deescalation_counter++;
 
     if (engine->deescalation_counter >= engine->deescalation_limit) {
       engine->current_state = STATE_NORMAL;
       engine->deescalation_counter = 0;
     }
-    /* Otherwise stay at current state while cooling down */
   }
 
   engine->critical_countdown = 0;

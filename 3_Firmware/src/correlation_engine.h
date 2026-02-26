@@ -1,16 +1,16 @@
 /*
- * correlation_engine.h — Multi-Modal Correlation Engine
+ * correlation_engine.h — Multi-Modal Correlation Engine (Full Pack Edition)
  *
- * This is the "false-positive killer" — the core innovation of
- * the project. Instead of triggering an emergency on a single
- * sensor alarm, it counts HOW MANY independent anomaly categories
- * are active simultaneously and escalates accordingly:
+ * The "false-positive killer" — counts HOW MANY independent anomaly
+ * categories are active simultaneously and escalates accordingly:
  *
  *   0 categories → NORMAL
  *   1 category   → WARNING  (increase monitoring)
  *   2 categories → CRITICAL (prepare for disconnect, countdown starts)
  *   3+ categories→ EMERGENCY (immediate relay disconnect)
  *   Short circuit → EMERGENCY (immediate, bypass counting)
+ *
+ * Enhanced with: hotspot tracking, per-module anomaly mask, risk scoring
  */
 
 #ifndef CORRELATION_ENGINE_H
@@ -33,31 +33,29 @@ typedef enum {
 
 /* -----------------------------------------------------------------------
  * Correlation engine context
- *
- * Holds the current state and manages the CRITICAL→EMERGENCY countdown.
  * ----------------------------------------------------------------------- */
 
 typedef struct {
   system_state_t current_state;
 
-  /* CRITICAL state countdown:
-   * When we enter CRITICAL, we start a countdown. If the condition
-   * persists for `critical_countdown_limit` cycles, we escalate
-   * to EMERGENCY. This prevents false alarms from brief spikes. */
+  /* CRITICAL state countdown */
   uint16_t critical_countdown;
   uint16_t critical_countdown_limit; /* Default: 20 cycles = 10s at 500ms */
 
-  /* De-escalation cooldown:
-   * After entering WARNING/CRITICAL, we don't immediately drop back
-   * to NORMAL — we wait for sustained normal readings. */
+  /* De-escalation cooldown */
   uint16_t deescalation_counter;
   uint16_t deescalation_limit; /* Default: 10 cycles = 5s at 500ms */
 
-  /* Emergency latch:
-   * Once we enter EMERGENCY, we stay there until manually reset.
-   * This is a safety feature — you don't auto-recover from a
-   * potential thermal runaway. */
+  /* Emergency latch with recovery hold */
   bool emergency_latched;
+  uint16_t emergency_recovery_counter;
+  uint16_t emergency_recovery_limit; /* Default: 10 cycles = 5s at 500ms */
+
+  /* Hotspot tracking (from latest anomaly result) */
+  uint8_t hotspot_module;       /* Module with worst anomaly (1-based)     */
+  uint8_t anomaly_modules_mask; /* Which modules have anomalies            */
+  float risk_factor;            /* 0.0 – 1.0 from anomaly eval            */
+  uint8_t cascade_stage;        /* Thermal cascade stage index             */
 
   /* Statistics */
   uint32_t total_evaluations;
@@ -81,7 +79,7 @@ system_state_t correlation_engine_update(correlation_engine_t *engine,
 /* Get a human-readable name for a state */
 const char *correlation_state_name(system_state_t state);
 
-/* Manually reset the engine (e.g., after servicing an emergency) */
+/* Manually reset the engine */
 void correlation_engine_reset(correlation_engine_t *engine);
 
 #endif /* CORRELATION_ENGINE_H */

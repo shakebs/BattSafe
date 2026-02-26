@@ -19,14 +19,14 @@
 
   <header class="topbar">
     <div>
-      <p class="eyebrow">V2 Demo Web Build <span id="modeBadge" class="mode-badge">SIM</span></p>
+      <p class="eyebrow">V2 Demo Web Build <span id="modeBadge" class="mode-badge">WAIT</span></p>
       <h1>EV Battery Thermal Runaway Prevention Dashboard</h1>
-      <p class="subtitle" id="scenarioLabel">Scenario: Normal Operation</p>
+      <p class="subtitle" id="scenarioLabel">Pipeline: Connecting to VSDSquadron output stream</p>
       <p class="bridge-status idle" id="bridgeStatus">Bridge: waiting for input</p>
       <div class="signal-stats">
         <span class="signal-stat"
-          title="Full-scale: 104 group voltages + 19 NTCs + gas/pressure/swelling = 131+ channels">
-          <strong id="signalCount">131</strong> Signals Processed
+          title="Full-scale: 104 group voltages + 19 NTC + gas/pressure/swelling = 139 channels">
+          <strong id="signalCount">139</strong> Signals Processed
         </span>
         <span class="signal-stat-sep">|</span>
         <span class="signal-stat">
@@ -38,17 +38,17 @@
         </span>
         <span class="signal-stat-sep">|</span>
         <span class="signal-stat signal-stat-link">
-          <a href="http://localhost:5001" target="_blank" title="Open full-scale 104S8P digital twin simulator">🔗
-            Full-Scale Twin →</a>
+          <a href="http://localhost:5001" target="_blank" title="Open full-scale 104S8P digital twin simulator">
+            Full-Scale Twin ->
+          </a>
         </span>
       </div>
     </div>
     <div class="controls">
       <label class="speed">
         Mode
-        <select id="inputModeSelect">
-          <option value="timeline" selected>Timeline</option>
-          <option value="manual">Manual</option>
+        <select id="inputModeSelect" disabled>
+          <option value="usb_pipeline" selected>USB Pipeline</option>
         </select>
       </label>
       <button id="detectBtn" class="btn ghost">Detect Board</button>
@@ -67,62 +67,35 @@
   </header>
 
   <main class="grid">
-    <section class="card full manual-card" id="manualCard">
-      <h2>[M] Manual Fault Injection</h2>
-      <div class="manual-grid">
-        <label>Voltage (V)<input id="mVoltage" type="number" step="0.1" value="14.8"></label>
-        <label>Current (A)<input id="mCurrent" type="number" step="0.1" value="2.1"></label>
-        <label>Max Cell Temp (C)<input id="mTemp" type="number" step="0.1" value="28"></label>
-        <label>Gas Ratio<input id="mGas" type="number" step="0.01" value="0.98"></label>
-        <label>Pressure Delta (hPa)<input id="mPressure" type="number" step="0.1" value="0"></label>
-        <label>Swelling (%)<input id="mSwelling" type="number" step="0.1" value="2"></label>
-      </div>
-      <div class="manual-actions">
-        <select id="presetSelect">
-          <option value="normal">Preset: Normal</option>
-          <option value="thermal">Preset: Thermal</option>
-          <option value="gas">Preset: Gas</option>
-          <option value="critical">Preset: Critical (2-cat)</option>
-          <option value="emergency">Preset: Emergency (3-cat)</option>
-          <option value="short">Preset: Short Circuit</option>
-        </select>
-        <button id="loadPresetBtn" class="btn ghost">Load Preset</button>
-        <button id="applyManualBtn" class="btn primary">Apply Values</button>
-      </div>
-      <p class="manual-note">
-        Manual mode reuses the same anomaly + correlation logic. Emergency remains latched until reset.
-      </p>
-    </section>
-
     <section class="card full">
       <h2>Processing Output</h2>
       <div class="outputs-grid">
         <div class="output-block output-raw raw-state-normal" id="outRawPanel">
-          <h3>Raw Data Trends (From 5001)</h3>
+          <h3>Raw Data (Twin Inputs Seen by VSDSquadron)</h3>
           <div class="raw-kpi-grid">
             <div class="raw-kpi">
               <span>Pack Voltage</span>
-              <strong id="rawPackVoltage">—</strong>
+              <strong id="rawPackVoltage">-</strong>
             </div>
             <div class="raw-kpi">
               <span>Pack Current</span>
-              <strong id="rawPackCurrent">—</strong>
+              <strong id="rawPackCurrent">-</strong>
             </div>
             <div class="raw-kpi">
-              <span>Cell Temp</span>
-              <strong id="rawCellTemp">—</strong>
+              <span>Hotspot Temp</span>
+              <strong id="rawCellTemp">-</strong>
             </div>
             <div class="raw-kpi">
-              <span>Gas Ratio</span>
-              <strong id="rawGasRatio">—</strong>
+              <span>Gas Ratio (Min)</span>
+              <strong id="rawGasRatio">-</strong>
             </div>
             <div class="raw-kpi">
-              <span>Pressure Δ</span>
-              <strong id="rawPressureDelta">—</strong>
+              <span>Pressure Delta (Max)</span>
+              <strong id="rawPressureDelta">-</strong>
             </div>
             <div class="raw-kpi">
-              <span>Swelling</span>
-              <strong id="rawSwellingPct">—</strong>
+              <span>Swelling (Max)</span>
+              <strong id="rawSwellingPct">-</strong>
             </div>
           </div>
           <div class="mini-chart-wrap">
@@ -137,11 +110,11 @@
         </div>
 
         <div class="output-block output-detection detect-normal" id="outDetection">
-          <h3>Intelligent Detection (Board)</h3>
+          <h3>Intelligent Detection (VSDSquadron Logic)</h3>
           <div class="detect-summary">
             <div class="detect-item">
               <span>System State</span>
-              <strong id="detectState">—</strong>
+              <strong id="detectState">-</strong>
             </div>
             <div class="detect-item">
               <span>Anomaly Count</span>
@@ -174,15 +147,15 @@
           <div class="risk-hotspot-grid">
             <div class="risk-hotspot-item">
               <span>Hottest Cell</span>
-              <strong id="outHottestCell">—</strong>
+              <strong id="outHottestCell">-</strong>
             </div>
             <div class="risk-hotspot-item">
               <span>Peak Temp</span>
-              <strong id="outHottestTemp">—</strong>
+              <strong id="outHottestTemp">-</strong>
             </div>
             <div class="risk-hotspot-item">
               <span>Max dT/dt</span>
-              <strong id="outHottestDtDt">—</strong>
+              <strong id="outHottestDtDt">-</strong>
             </div>
           </div>
           <div class="risk-cascade-title">Cascade Timeline</div>
@@ -190,13 +163,12 @@
         </div>
       </div>
     </section>
-
   </main>
 
   <footer>
-    Prototype mirrors firmware 7-scenario cycle (215s).
-    Full-scale: 104×V + 19×NTC + 2×Gas + 2×ΔP + 8×Swell = 131+ channels @ 10 Hz.
-    <a href="http://localhost:5001" target="_blank" style="color:#7dd3fc;text-decoration:none;">Open Digital Twin →</a>
+    Architecture: Digital Twin sensors (5001) -> USB input -> VSDSquadron processing -> USB output dashboard (5000).
+    Full-scale: 104xV + 19xNTC + 2xGas + 2xPressure + 8xSwelling = 139 channels @ 10 Hz.
+    <a href="http://localhost:5001" target="_blank" style="color:#7dd3fc;text-decoration:none;">Open Digital Twin -></a>
   </footer>
 
   <script src="./app.js"></script>

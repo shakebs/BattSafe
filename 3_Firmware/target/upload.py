@@ -7,8 +7,8 @@ Uploads a binary file to the THEJAS32 board via XMODEM protocol.
 Includes DTR/RTS reset sequence matching the official vega-xmodem tool.
 
 Usage:
-  python3 firmware/target/upload.py firmware/build/user.bin
-  python3 firmware/target/upload.py firmware/build/user.bin --port /dev/cu.usbserial-10
+  python 3_Firmware/target/upload.py 3_Firmware/build/user.bin
+  python 3_Firmware/target/upload.py 3_Firmware/build/user.bin --port COM5
 """
 
 import sys
@@ -18,6 +18,7 @@ import argparse
 
 try:
     import serial
+    import serial.tools.list_ports
 except ImportError:
     print("ERROR: pyserial not installed. Run: pip install pyserial")
     sys.exit(1)
@@ -32,6 +33,29 @@ CAN = 0x18
 SUB = 0x1A
 CRC_MODE = ord('C')
 BLOCK_SIZE = 128
+
+
+def auto_detect_port():
+    """Find likely VSDSquadron serial port."""
+    try:
+        ports = serial.tools.list_ports.comports()
+    except Exception:
+        return None
+
+    preferred = []
+    fallback = []
+    for p in ports:
+        desc = (p.description or "").lower()
+        if any(k in desc for k in ["vsdsquadron", "ch340", "ch341", "cp210", "usb-serial"]):
+            preferred.append(p.device)
+        else:
+            fallback.append(p.device)
+
+    if preferred:
+        return preferred[0]
+    if fallback:
+        return fallback[0]
+    return None
 
 
 def calc_crc16(data: bytes) -> int:
@@ -203,8 +227,8 @@ def main():
         description="Upload firmware to VSDSquadron ULTRA via XMODEM"
     )
     parser.add_argument("binary", help="Path to .bin file")
-    parser.add_argument("--port", default="/dev/cu.usbserial-110",
-                        help="Serial port (default: /dev/cu.usbserial-110)")
+    parser.add_argument("--port", default=None,
+                        help="Serial port (auto-detect if omitted, e.g. COM5)")
     parser.add_argument("--baud", type=int, default=115200,
                         help="Baud rate (default: 115200)")
     parser.add_argument("--no-reset", action="store_true",
@@ -216,18 +240,23 @@ def main():
     print("=" * 50)
     print()
 
+    port = args.port or auto_detect_port()
+    if not port:
+        print("ERROR: No serial port detected. Plug board and pass --port COMx explicitly.")
+        sys.exit(1)
+
     try:
         ser = serial.Serial(
-            port=args.port,
+            port=port,
             baudrate=args.baud,
             timeout=2,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
         )
-        print(f"Opened {args.port} at {args.baud} baud")
+        print(f"Opened {port} at {args.baud} baud")
     except serial.SerialException as e:
-        print(f"ERROR: Cannot open {args.port}: {e}")
+        print(f"ERROR: Cannot open {port}: {e}")
         sys.exit(1)
 
     try:

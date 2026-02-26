@@ -1,447 +1,407 @@
-#!/usr/bin/env python3
 """
-Serial Packet Reader — Connects dashboard to the real board
-============================================================
+Serial Reader — Multi-Frame Telemetry Decoder (Full Pack Edition)
+===================================================================
+Reads multi-frame telemetry from the VSDSquadron ULTRA output.
 
-When the VSDSquadron ULTRA board is connected via USB,
-this module reads UART telemetry packets and converts them
-into SensorReading objects that the dashboard can display.
+Protocol:
+  Frame 0x01 (Pack):   40 bytes — Pack summary + anomaly + risk
+  Frame 0x02 (Module): 20 bytes × 8 — Per-module NTC, swelling, voltage
 
-Usage:
-  # Auto-detect board
-  python3 dashboard/src/serial_reader.py
-
-  # Specify port
-  python3 dashboard/src/serial_reader.py --port /dev/tty.usbserial-XXX
-
-  # List available ports
-  python3 dashboard/src/serial_reader.py --list
+Each frame: [0xAA][LEN][TYPE][payload][XOR_checksum]
 """
 
 import struct
 import time
-import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 try:
     import serial
     import serial.tools.list_ports
+    HAS_SERIAL = True
 except ImportError:
-    print("ERROR: pyserial not installed. Run:")
-    print("  pip install pyserial")
-    sys.exit(1)
+    HAS_SERIAL = False
 
-
-# Telemetry packet format (must match packet_format.h)
+# Protocol constants
 SYNC_BYTE = 0xAA
-PACKET_SIZE = 32
+PACK_FRAME_TYPE = 0x01
+MODULE_FRAME_TYPE = 0x02
+PACK_FRAME_SIZE = 38
+MODULE_FRAME_SIZE = 17
 
-# Packet field layout (after sync + length bytes):
-# Offset  Size  Field
-#   0      1    sync (0xAA)
-#   1      1    length
-#   2-5    4    timestamp_ms (uint32_t LE)
-#   6-7    2    voltage_x100 (uint16_t LE)
-#   8-9    2    current_x100 (uint16_t LE)
-#  10-11   2    r_internal_mohm (uint16_t LE)
-#  12-13   2    temp_cell1_x10 (int16_t LE)
-#  14-15   2    temp_cell2_x10 (int16_t LE)
-#  16-17   2    temp_cell3_x10 (int16_t LE)
-#  18-19   2    temp_cell4_x10 (int16_t LE)
-#  20-21   2    gas_ratio_x100 (uint16_t LE)
-#  22-23   2    pressure_delta_x100 (int16_t LE)
-#  24      1    swelling_pct
-#  25      1    system_state
-#  26      1    anomaly_mask
-#  27      1    anomaly_count
-#  28      1    temp_ambient_dt (int8, deci-°C)
-#  29      1    dt_dt_max_cdps  (uint8, ×100 °C/s)
-#  30      1    flags (bit0: emergency_direct)
-#  31      1    checksum (XOR)
+NUM_MODULES = 8
+
+# State names
+STATE_NAMES = {0: "NORMAL", 1: "WARNING", 2: "CRITICAL", 3: "EMERGENCY"}
+
+# Cascade stage names
+CASCADE_NAMES = ["Normal", "Elevated", "SEI_Decomp", "Separator",
+                 "Electrolyte", "Cathode", "RUNAWAY"]
+
+
+def active_categories(mask):
+    """Return list of active category names from bitmask."""
+    cats = []
+    if mask & 0x01: cats.append("Electrical")
+    if mask & 0x02: cats.append("Thermal")
+    if mask & 0x04: cats.append("Gas")
+    if mask & 0x08: cats.append("Pressure")
+    if mask & 0x10: cats.append("Swelling")
+    return cats
+
+
+@dataclass
+class ModuleReading:
+    """Per-module telemetry data from firmware output."""
+    module_index: int = 0
+    ntc1_c: float = 25.0
+    ntc2_c: float = 25.0
+    swelling_pct: float = 0.0
+    delta_t_intra: float = 0.0
+    max_dt_dt: float = 0.0
+    module_voltage: float = 41.6   # 13 × 3.2V
+    v_spread_mv: float = 0.0
+
+    def to_dict(self):
+        return {
+            "module_index": self.module_index,
+            "ntc1": self.ntc1_c,
+            "ntc2": self.ntc2_c,
+            "swelling_pct": self.swelling_pct,
+            "delta_t_intra": self.delta_t_intra,
+            "max_dt_dt": self.max_dt_dt,
+            "module_voltage": self.module_voltage,
+            "v_spread_mv": self.v_spread_mv,
+        }
 
 
 @dataclass
 class BoardReading:
-    """Decoded telemetry reading from the board."""
-    timestamp_ms: int
-    voltage_v: float
-    current_a: float
-    r_internal_mohm: float
-    temp_cell1_c: float
-    temp_cell2_c: float
-    temp_cell3_c: float
-    temp_cell4_c: float
-    gas_ratio: float
-    pressure_delta_hpa: float
-    swelling_pct: float
-    system_state: str
-    anomaly_mask: int
-    anomaly_count: int
+    """Full-pack telemetry reading from the board."""
+    # Pack summary
+    timestamp_ms: int = 0
+    voltage_v: float = 332.8
+    current_a: float = 0.0
+    r_internal_mohm: float = 0.44
+
+    # Thermal
+    max_temp_c: float = 30.0
     temp_ambient_c: float = 25.0
+    core_temp_est_c: float = 30.0
     dt_dt_max: float = 0.0
+
+    # Gas & pressure
+    gas_ratio_1: float = 1.0
+    gas_ratio_2: float = 1.0
+    pressure_delta_1_hpa: float = 0.0
+    pressure_delta_2_hpa: float = 0.0
+
+    # Pack health
+    v_spread_mv: float = 0.0
+    temp_spread_c: float = 0.0
+
+    # System state
+    system_state: str = "NORMAL"
+    anomaly_mask: int = 0
+    anomaly_count: int = 0
+    anomaly_modules: int = 0
+    hotspot_module: int = 0
+
+    # Risk
+    risk_pct: int = 0
+    cascade_stage: int = 0
     emergency_direct: bool = False
 
+    # Per-module data
+    module_data: List[dict] = field(default_factory=list)
 
-STATE_NAMES = {0: "NORMAL", 1: "WARNING", 2: "CRITICAL", 3: "EMERGENCY"}
-CATEGORY_NAMES = {
-    0x01: "electrical",
-    0x02: "thermal",
-    0x04: "gas",
-    0x08: "pressure",
-    0x10: "swelling",
-}
+    # Legacy compat (first 4 module NTCs)
+    temp_cell1_c: float = 25.0
+    temp_cell2_c: float = 25.0
+    temp_cell3_c: float = 25.0
+    temp_cell4_c: float = 25.0
 
+    # Legacy compat single-value
+    gas_ratio: float = 1.0
+    pressure_delta_hpa: float = 0.0
+    swelling_pct: float = 0.0
 
-def decode_packet(raw: bytes) -> BoardReading | None:
-    """Decode a raw telemetry packet into a BoardReading.
+    def update_legacy_compat(self):
+        """Fill in legacy 4-cell fields from module data."""
+        if len(self.module_data) > 0:
+            self.temp_cell1_c = self.module_data[0].get('ntc1', 25.0)
+        if len(self.module_data) > 1:
+            self.temp_cell2_c = self.module_data[1].get('ntc1', 25.0)
+        if len(self.module_data) > 2:
+            self.temp_cell3_c = self.module_data[2].get('ntc1', 25.0)
+        if len(self.module_data) > 3:
+            self.temp_cell4_c = self.module_data[3].get('ntc1', 25.0)
 
-    Returns None if the packet is invalid.
-    """
-    if len(raw) < PACKET_SIZE:
-        return None
-    if raw[0] != SYNC_BYTE:
-        return None
-    if raw[1] != PACKET_SIZE:
-        return None
-
-    # Verify checksum (XOR of all bytes except last)
-    checksum = 0
-    for b in raw[:-1]:
-        checksum ^= b
-    if checksum != raw[-1]:
-        return None
-
-    # Unpack fields (little-endian)
-    # Skip sync(1) + length(1) = 2 bytes header
-    (timestamp_ms,) = struct.unpack_from("<I", raw, 2)
-    (voltage_x100,) = struct.unpack_from("<H", raw, 6)
-    (current_x100,) = struct.unpack_from("<H", raw, 8)
-    (r_int_mohm,) = struct.unpack_from("<H", raw, 10)
-    (t1_x10,) = struct.unpack_from("<h", raw, 12)
-    (t2_x10,) = struct.unpack_from("<h", raw, 14)
-    (t3_x10,) = struct.unpack_from("<h", raw, 16)
-    (t4_x10,) = struct.unpack_from("<h", raw, 18)
-    (gas_x100,) = struct.unpack_from("<H", raw, 20)
-    (press_x100,) = struct.unpack_from("<h", raw, 22)
-    swelling = raw[24]
-    state = raw[25]
-    mask = raw[26]
-    count = raw[27]
-    # New fields (formerly reserved)
-    temp_ambient_dt = struct.unpack_from("<b", raw, 28)[0]  # int8
-    dt_dt_cdps = raw[29]                                      # uint8
-    flags = raw[30]                                            # uint8
-
-    return BoardReading(
-        timestamp_ms=timestamp_ms,
-        voltage_v=voltage_x100 / 100.0,
-        current_a=current_x100 / 100.0,
-        r_internal_mohm=float(r_int_mohm),
-        temp_cell1_c=t1_x10 / 10.0,
-        temp_cell2_c=t2_x10 / 10.0,
-        temp_cell3_c=t3_x10 / 10.0,
-        temp_cell4_c=t4_x10 / 10.0,
-        gas_ratio=gas_x100 / 100.0,
-        pressure_delta_hpa=press_x100 / 100.0,
-        swelling_pct=swelling,
-        system_state=STATE_NAMES.get(state, f"UNKNOWN({state})"),
-        anomaly_mask=mask,
-        anomaly_count=count,
-        temp_ambient_c=temp_ambient_dt / 10.0,
-        dt_dt_max=dt_dt_cdps / 100.0,
-        emergency_direct=bool(flags & 0x01),
-    )
+        self.gas_ratio = min(self.gas_ratio_1, self.gas_ratio_2)
+        self.pressure_delta_hpa = max(self.pressure_delta_1_hpa,
+                                       self.pressure_delta_2_hpa)
+        if self.module_data:
+            self.swelling_pct = max(m.get('swelling_pct', 0)
+                                    for m in self.module_data)
 
 
-def active_categories(mask: int) -> list[str]:
-    """Convert anomaly bitmask to list of category names."""
-    return [name for bit, name in CATEGORY_NAMES.items() if mask & bit]
-
-
-def find_board_port() -> str | None:
-    """Auto-detect the VSDSquadron ULTRA serial port."""
-    ports = list(serial.tools.list_ports.comports())
-    if not ports:
+def find_board_port() -> Optional[str]:
+    """Try to auto-detect the VSDSquadron board serial port."""
+    if not HAS_SERIAL:
         return None
 
-    def score_port(port) -> int:
-        device = (port.device or "").lower()
-        desc = (port.description or "").lower()
-        hwid = (port.hwid or "").lower()
-        blob = f"{device} {desc} {hwid}"
-
-        # Avoid common non-target pseudo ports.
-        # Include Bluetooth SPP devices that don't say "bluetooth" in name.
-        if any(kw in blob for kw in ["debug-console", "bluetooth", "irda"]):
-            return -100
-
-        # Bluetooth SPP ports on macOS: /dev/cu.DeviceName (no "usb" in path).
-        # Real USB-serial adapters always have "usb" in the macOS device path.
-        is_usb_port = "usb" in device
-        if not is_usb_port:
-            return -50  # Almost certainly Bluetooth or built-in, not our board
-
-        score = 0
-        if any(kw in blob for kw in ["usbserial", "usb serial", "wch", "ch340", "cp210", "ftdi"]):
-            score += 80
-        if any(kw in blob for kw in ["uart", "tty.usb", "cu.usb"]):
-            score += 40
-        if "modem" in blob:
-            score += 20
-        if "debug" in blob:
-            score -= 40
-        return score
-
-    ranked = sorted(ports, key=score_port, reverse=True)
-    best = ranked[0]
-    if score_port(best) > 0:
-        return best.device
-
-    # Conservative fallback: first USB-based device.
-    for p in ranked:
-        device = (p.device or "").lower()
-        if "usb" in device:
+    ports = serial.tools.list_ports.comports()
+    for p in ports:
+        desc = (p.description or '').lower()
+        if any(k in desc for k in ['ch340', 'ch341', 'usb-serial', 'vsdsquadron']):
             return p.device
+    if ports:
+        return ports[0].device
     return None
 
 
-def list_ports():
-    """Print all available serial ports."""
-    ports = serial.tools.list_ports.comports()
-    if not ports:
-        print("No serial ports found.")
-        return
-    print(f"Found {len(ports)} port(s):\n")
-    for p in ports:
-        print(f"  {p.device}")
-        print(f"    Description: {p.description}")
-        print(f"    Hardware ID: {p.hwid}")
-        print()
-
-
 class SerialReader:
-    """Reads telemetry packets from the board over USB serial.
+    """Reads and decodes multi-frame telemetry from VSDSquadron ULTRA."""
 
-    Usage:
-        reader = SerialReader("/dev/tty.usbserial-XXX")
-        reader.open()
-
-        while True:
-            reading = reader.read_packet()
-            if reading:
-                print(reading)
-    """
-
-    def __init__(self, port: str, baud: int = 115200):
+    def __init__(self, port: str, baud: int = 115200, timeout: float = 2.0):
         self.port = port
         self.baud = baud
+        self.timeout = timeout
         self.ser = None
-        self.buffer = bytearray()
+        self._buf = bytearray()
+
+        # Latest parsed data
+        self._pack_frame = None
+        self._module_frames = {}
+        self._last_reading = None
 
     def open(self):
-        """Open the serial port."""
+        """Open serial port."""
+        if not HAS_SERIAL:
+            raise RuntimeError("pyserial not installed")
+
         self.ser = serial.Serial(
-            port=self.port,
-            baudrate=self.baud,
-            timeout=0.1,    # 100ms read timeout
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
+            self.port, self.baud, timeout=self.timeout,
+            write_timeout=1.0
         )
-        # Bring the board into a known state: pulse reset lines similar to uploader.
-        try:
-            self.ser.dtr = False
-            self.ser.rts = False
-            time.sleep(0.1)
-            self.ser.dtr = True
-            self.ser.rts = True
-            time.sleep(0.25)
-            self.ser.dtr = False
-            self.ser.rts = False
-            time.sleep(0.35)
-
-            # Probe startup output to decide whether ROM bootloader is active.
-            probe = bytearray()
-            deadline = time.time() + 0.4
-            while time.time() < deadline:
-                chunk = self.ser.read(32)
-                if chunk:
-                    probe.extend(chunk)
-
-            # If we mostly see 'C', ROM is waiting for XMODEM/ENTER.
-            if probe and probe.count(ord("C")) >= int(len(probe) * 0.6):
-                self.ser.write(b"\r\n")
-                self.ser.flush()
-                time.sleep(0.1)
-            else:
-                # Keep already-read bytes so packet parser can consume them.
-                self.buffer.extend(probe)
-        except Exception:
-            pass
-        print(f"Opened {self.port} at {self.baud} baud")
+        self._buf = bytearray()
+        print(f"[SerialReader] Opened {self.port} @ {self.baud}")
 
     def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-
-    def read_packet(self) -> BoardReading | None:
-        """Read and decode one telemetry packet.
-
-        Returns None if no valid packet is available yet.
-        Also auto-detects the ROM bootloader's 'C' pattern after a board
-        reset and sends ENTER to jump to existing firmware.
-        """
-        if not self.ser:
-            return None
-
-        # Read available bytes into buffer
-        available = self.ser.in_waiting
-        if available > 0:
-            self.buffer.extend(self.ser.read(available))
-
-        # --- Bootloader auto-skip ---
-        # If the board was reset, the ROM bootloader sends continuous 'C'
-        # (XMODEM CRC handshake).  Sending CAN (cancel) bytes followed by
-        # ENTER tells it to abort XMODEM and jump to firmware in flash.
-        if len(self.buffer) >= 8:
-            c_count = self.buffer.count(ord("C"))
-            if c_count >= int(len(self.buffer) * 0.6):
-                # Rate-limit: only attempt once every 3 seconds
-                now = time.time()
-                if now - getattr(self, "_last_boot_skip", 0) < 3.0:
-                    self.buffer.clear()
-                    return None
-                self._last_boot_skip = now
-
-                print("[AUTO] Bootloader detected (CCC pattern) — "
-                      "sending CAN + ENTER to jump to firmware...")
-                CAN = b"\x18"  # XMODEM cancel byte
-                self.ser.write(CAN * 8)  # Cancel any pending transfer
-                self.ser.flush()
-                time.sleep(0.3)
-                self.ser.write(b"\r\n")  # Tell bootloader to jump
-                self.ser.flush()
-                self.buffer.clear()
-                time.sleep(1.5)  # Give firmware time to boot
-                # Drain the boot banner text
-                if self.ser.in_waiting > 0:
-                    self.buffer.extend(self.ser.read(self.ser.in_waiting))
-                return None
-
-        # Search for sync byte
-        while len(self.buffer) >= PACKET_SIZE:
-            # Find next sync byte
-            idx = self.buffer.find(SYNC_BYTE)
-            if idx < 0:
-                self.buffer.clear()
-                return None
-
-            # Discard bytes before sync
-            if idx > 0:
-                self.buffer = self.buffer[idx:]
-
-            # Check if we have a full packet
-            if len(self.buffer) < PACKET_SIZE:
-                return None
-
-            # Try to decode
-            raw = bytes(self.buffer[:PACKET_SIZE])
-            reading = decode_packet(raw)
-
-            if reading:
-                # Valid packet — consume it
-                self.buffer = self.buffer[PACKET_SIZE:]
-                return reading
-            else:
-                # Invalid — skip this sync byte and search for next
-                self.buffer = self.buffer[1:]
-
-        return None
-
-    def read_latest_packet(self, max_packets: int = 128) -> BoardReading | None:
-        """Read all currently decodable packets and return the newest one.
-
-        This prevents UI lag when producer rate temporarily exceeds
-        dashboard frame rate.
-        """
-        latest = None
-        for _ in range(max_packets):
-            reading = self.read_packet()
-            if reading is None:
-                break
-            latest = reading
-        return latest
-
-    def read_text_line(self) -> str | None:
-        """Read a text debug line (like [STATE] or [TEL] messages)."""
-        if not self.ser:
-            return None
-        if self.ser.in_waiting > 0:
+        """Close serial port."""
+        if self.ser:
             try:
-                line = self.ser.readline().decode("utf-8", errors="replace").strip()
+                self.ser.close()
+            except:
+                pass
+            self.ser = None
+
+    def read_text_line(self) -> Optional[str]:
+        """Read a text line from the serial port."""
+        if not self.ser or not self.ser.is_open:
+            return None
+        try:
+            if self.ser.in_waiting:
+                line = self.ser.readline().decode('ascii', errors='replace').strip()
                 if line:
                     return line
-            except Exception:
-                pass
+        except:
+            pass
         return None
 
+    def read_latest_packet(self) -> Optional[BoardReading]:
+        """Read and decode multi-frame telemetry.
 
-# ---------------------------------------------------------------------------
-# CLI — Run standalone to test the serial connection
-# ---------------------------------------------------------------------------
+        Reads available bytes, parses frames, and returns a BoardReading
+        when a complete set (pack + modules) is available.
+        """
+        if not self.ser or not self.ser.is_open:
+            return None
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="Read telemetry from VSDSquadron ULTRA board"
-    )
-    parser.add_argument("--port", type=str, help="Serial port (e.g., /dev/tty.usbserial-XXX)")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
-    parser.add_argument("--list", action="store_true", help="List available ports")
-    parser.add_argument("--raw", action="store_true", help="Show raw text output instead of decoded packets")
-    args = parser.parse_args()
+        # Read available bytes
+        try:
+            avail = self.ser.in_waiting
+            if avail > 0:
+                data = self.ser.read(min(avail, 1024))
+                self._buf.extend(data)
+        except Exception:
+            return None
 
-    if args.list:
-        list_ports()
-        return
+        # Try to parse frames from buffer
+        changed = self._parse_frames()
 
-    port = args.port or find_board_port()
-    if not port:
-        print("ERROR: No serial port found. Use --port or --list")
-        sys.exit(1)
+        # Return a reading if we have pack frame + at least some modules
+        if self._pack_frame and len(self._module_frames) > 0:
+            reading = self._build_reading()
+            return reading
 
-    reader = SerialReader(port, args.baud)
-    try:
-        reader.open()
-        print("Waiting for telemetry...\n")
+        return self._last_reading if changed else None
 
-        if args.raw:
-            # Raw mode — print text lines as-is
-            while True:
-                line = reader.read_text_line()
-                if line:
-                    print(line)
-        else:
-            # Decoded mode — parse binary packets
-            while True:
-                reading = reader.read_packet()
-                if reading:
-                    cats = active_categories(reading.anomaly_mask)
-                    print(f"t={reading.timestamp_ms:>6}ms | "
-                          f"V={reading.voltage_v:.1f} I={reading.current_a:.1f} | "
-                          f"T=[{reading.temp_cell1_c:.0f},{reading.temp_cell2_c:.0f},"
-                          f"{reading.temp_cell3_c:.0f},{reading.temp_cell4_c:.0f}] | "
-                          f"gas={reading.gas_ratio:.2f} dP={reading.pressure_delta_hpa:.1f} | "
-                          f"state={reading.system_state} cats={','.join(cats) or 'none'}")
-                time.sleep(0.01)
+    def _parse_frames(self) -> bool:
+        """Parse any complete frames from the buffer. Returns True if new data."""
+        changed = False
 
-    except KeyboardInterrupt:
-        print("\nStopped.")
-    except serial.SerialException as e:
-        print(f"Serial error: {e}")
-    finally:
-        reader.close()
+        while len(self._buf) >= 3:
+            # Find sync byte
+            try:
+                sync_idx = self._buf.index(SYNC_BYTE)
+            except ValueError:
+                self._buf.clear()
+                break
 
+            # Discard bytes before sync
+            if sync_idx > 0:
+                del self._buf[:sync_idx]
 
-if __name__ == "__main__":
-    main()
+            if len(self._buf) < 3:
+                break
+
+            frame_len = self._buf[1]
+            frame_type = self._buf[2]
+
+            # Validate frame type and length
+            if frame_type == PACK_FRAME_TYPE and frame_len != PACK_FRAME_SIZE:
+                del self._buf[0]
+                continue
+            elif frame_type == MODULE_FRAME_TYPE and frame_len != MODULE_FRAME_SIZE:
+                del self._buf[0]
+                continue
+            elif frame_type not in (PACK_FRAME_TYPE, MODULE_FRAME_TYPE):
+                del self._buf[0]
+                continue
+
+            # Wait for full frame
+            if len(self._buf) < frame_len:
+                break
+
+            # Validate checksum
+            frame_data = bytes(self._buf[:frame_len])
+            expected_csum = 0
+            for b in frame_data[:-1]:
+                expected_csum ^= b
+            if frame_data[-1] != expected_csum:
+                del self._buf[0]
+                continue
+
+            # Parse the frame
+            if frame_type == PACK_FRAME_TYPE:
+                self._pack_frame = self._decode_pack_frame(frame_data)
+                changed = True
+            elif frame_type == MODULE_FRAME_TYPE:
+                mod = self._decode_module_frame(frame_data)
+                if mod:
+                    self._module_frames[mod.module_index] = mod
+                    changed = True
+
+            # Consume frame
+            del self._buf[:frame_len]
+
+        return changed
+
+    def _decode_pack_frame(self, data: bytes) -> dict:
+        """Decode a 40-byte pack summary frame."""
+        # Skip sync (1), length (1), type (1) = 3-byte header
+        payload = data[3:-1]  # Exclude checksum
+
+        # Unpack: timestamp(u32) + packV(u16) + packI(i16) + Rint(u16) +
+        # maxT(i16) + ambT(i16) + coreT(i16) + dtdt(u8) +
+        # gas1(u8) + gas2(u8) + p1(i16) + p2(i16) +
+        # vspread(u16) + tspread(u8) +
+        # state(u8) + mask(u8) + count(u8) + anom_mods(u8) +
+        # hotspot(u8) + risk(u8) + cascade(u8) + flags(u8)
+        fmt = '<IHhHhhh B BB hh HB BBBB BBBB'
+        try:
+            vals = struct.unpack(fmt, payload)
+        except struct.error:
+            return None
+
+        return {
+            'timestamp_ms': vals[0],
+            'pack_voltage_dv': vals[1],
+            'pack_current_da': vals[2],
+            'r_int_cmohm': vals[3],
+            'max_temp_dt': vals[4],
+            'ambient_temp_dt': vals[5],
+            'core_temp_est_dt': vals[6],
+            'dt_dt_max_cdpm': vals[7],
+            'gas_ratio_1_cp': vals[8],
+            'gas_ratio_2_cp': vals[9],
+            'pressure_delta_1_chpa': vals[10],
+            'pressure_delta_2_chpa': vals[11],
+            'v_spread_dmv': vals[12],
+            'temp_spread_dt': vals[13],
+            'system_state': vals[14],
+            'anomaly_mask': vals[15],
+            'anomaly_count': vals[16],
+            'anomaly_modules': vals[17],
+            'hotspot_module': vals[18],
+            'risk_factor_pct': vals[19],
+            'cascade_stage': vals[20],
+            'flags': vals[21],
+        }
+
+    def _decode_module_frame(self, data: bytes) -> Optional[ModuleReading]:
+        """Decode a 20-byte module detail frame."""
+        payload = data[3:-1]
+
+        # module_idx(u8) + ntc1(i16) + ntc2(i16) + swelling(u8) +
+        # delta_t_intra(u8) + dt_dt(u8) + module_v(u16) + v_spread(u16) + reserved(u8)
+        fmt = '<B hh B BB HH B'
+        try:
+            vals = struct.unpack(fmt, payload)
+        except struct.error:
+            return None
+
+        mod = ModuleReading()
+        mod.module_index = vals[0]
+        mod.ntc1_c = vals[1] / 10.0
+        mod.ntc2_c = vals[2] / 10.0
+        mod.swelling_pct = float(vals[3])
+        mod.delta_t_intra = vals[4] / 10.0
+        mod.max_dt_dt = vals[5] / 100.0
+        mod.module_voltage = vals[6] / 10.0
+        mod.v_spread_mv = float(vals[7])
+
+        return mod
+
+    def _build_reading(self) -> BoardReading:
+        """Build a BoardReading from the latest pack + module frames."""
+        r = BoardReading()
+        pf = self._pack_frame
+
+        if pf:
+            r.timestamp_ms = pf['timestamp_ms']
+            r.voltage_v = pf['pack_voltage_dv'] / 10.0
+            r.current_a = pf['pack_current_da'] / 10.0
+            r.r_internal_mohm = pf['r_int_cmohm'] / 100.0
+            r.max_temp_c = pf['max_temp_dt'] / 10.0
+            r.temp_ambient_c = pf['ambient_temp_dt'] / 10.0
+            r.core_temp_est_c = pf['core_temp_est_dt'] / 10.0
+            r.dt_dt_max = pf['dt_dt_max_cdpm'] / 100.0
+            r.gas_ratio_1 = pf['gas_ratio_1_cp'] / 100.0
+            r.gas_ratio_2 = pf['gas_ratio_2_cp'] / 100.0
+            r.pressure_delta_1_hpa = pf['pressure_delta_1_chpa'] / 100.0
+            r.pressure_delta_2_hpa = pf['pressure_delta_2_chpa'] / 100.0
+            r.v_spread_mv = pf['v_spread_dmv'] / 10.0
+            r.temp_spread_c = pf['temp_spread_dt'] / 10.0
+            r.system_state = STATE_NAMES.get(pf['system_state'], "UNKNOWN")
+            r.anomaly_mask = pf['anomaly_mask']
+            r.anomaly_count = pf['anomaly_count']
+            r.anomaly_modules = pf['anomaly_modules']
+            r.hotspot_module = pf['hotspot_module']
+            r.risk_pct = pf['risk_factor_pct']
+            r.cascade_stage = pf['cascade_stage']
+            r.emergency_direct = bool(pf['flags'] & 0x01)
+
+        # Add module data
+        r.module_data = []
+        for i in range(NUM_MODULES):
+            if i in self._module_frames:
+                r.module_data.append(self._module_frames[i].to_dict())
+            else:
+                r.module_data.append(ModuleReading(module_index=i).to_dict())
+
+        r.update_legacy_compat()
+
+        self._last_reading = r
+        return r
