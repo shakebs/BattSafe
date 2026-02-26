@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV Battery Digital Twin — Input Simulator</title>
+    <meta name="description" content="104S8P battery pack sensor simulator for VSDSquadron">
+    <link rel="stylesheet" href="/static/style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+
+<body>
+
+    <!-- ═══════ HEADER ═══════ -->
+    <header class="header">
+        <div class="header-left">
+            <span class="logo">⚡</span>
+            <h1>EV Battery Digital Twin</h1>
+            <span class="badge">104S8P</span>
+        </div>
+        <div class="header-right">
+            <div class="header-stat">
+                <span class="stat-label">Channels</span>
+                <span class="stat-value" id="hdr-channels">139</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">Rate</span>
+                <span class="stat-value" id="hdr-rate">10 Hz</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">Speed</span>
+                <span class="stat-value" id="hdr-speed">1×</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">SOC</span>
+                <span class="stat-value" id="hdr-soc">50.0%</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">C-Rate</span>
+                <span class="stat-value" id="hdr-crate">0.00C</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">Sim Time</span>
+                <span class="stat-value" id="hdr-simtime">0.0s</span>
+            </div>
+            <div class="header-stat" id="serial-status">
+                <span class="stat-label">Serial</span>
+                <span class="stat-value status-dot" id="hdr-serial">●</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════ PACK CONFIGURATION (top banner) ═══════ -->
+    <section class="section pack-config-bar">
+        <div class="config-grid">
+            <div class="config-item"><span class="config-label">Architecture</span><span
+                    class="config-value">104S8P</span></div>
+            <div class="config-item"><span class="config-label">Modules</span><span class="config-value">8</span></div>
+            <div class="config-item"><span class="config-label">Groups/Mod</span><span class="config-value">13S</span>
+            </div>
+            <div class="config-item"><span class="config-label">Cells/Group</span><span class="config-value">8P</span>
+            </div>
+            <div class="config-item"><span class="config-label">Total Cells</span><span class="config-value">832</span>
+            </div>
+            <div class="config-item"><span class="config-label">Nominal V</span><span class="config-value">332.8V</span>
+            </div>
+            <div class="config-item"><span class="config-label">Capacity</span><span class="config-value">120 Ah</span>
+            </div>
+            <div class="config-item"><span class="config-label">Chemistry</span><span class="config-value">LFP</span>
+            </div>
+            <div class="config-item"><span class="config-label">Cell</span><span class="config-value">IFR32135</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════ SPLIT SCREEN: INPUTS | SENSORS ═══════ -->
+    <div class="split-container">
+
+        <!-- ──── LEFT PANEL: ALL INPUTS ──── -->
+        <div class="panel panel-inputs">
+            <div class="panel-header">🎛 Controls & Inputs</div>
+            <div class="panel-scroll">
+
+                <!-- Operating Mode & SOC -->
+                <div class="panel-section">
+                    <h3>Operating Mode</h3>
+                    <div class="controls-compact">
+                        <div class="control-row">
+                            <div class="mode-toggle">
+                                <button class="btn-mode active" id="btn-discharge" onclick="setMode(false)">⚡
+                                    Discharge</button>
+                                <button class="btn-mode" id="btn-charge" onclick="setMode(true)">🔋 Charge</button>
+                            </div>
+                        </div>
+                        <div class="control-row">
+                            <label>SOC: <span id="soc-val">50</span>%</label>
+                            <input type="range" id="soc-slider" min="0" max="100" value="50"
+                                oninput="document.getElementById('soc-val').textContent=this.value">
+                            <button class="btn-apply" onclick="applySoc()">Set</button>
+                        </div>
+                        <div class="control-row">
+                            <label>C-Rate</label>
+                            <input type="number" id="crate-input" value="0" step="0.1" min="0" max="5"
+                                style="width:55px">
+                            <button class="btn-apply" onclick="applyCrate()">Set</button>
+                        </div>
+                        <div class="control-row">
+                            <label>Ambient: <span id="ambient-val">30</span>°C</label>
+                            <input type="range" id="ambient-slider" min="-10" max="55" value="30"
+                                oninput="document.getElementById('ambient-val').textContent=this.value">
+                            <button class="btn-apply" onclick="applyAmbient()">Set</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Speed & Time Jump -->
+                <div class="panel-section">
+                    <h3>⏱ Speed & Time Jump</h3>
+                    <div class="speed-row">
+                        <label>Speed:</label>
+                        <div class="speed-buttons" id="speed-buttons">
+                            <button class="btn-speed active" onclick="setSimSpeed(1)" data-speed="1">1×</button>
+                            <button class="btn-speed" onclick="setSimSpeed(5)" data-speed="5">5×</button>
+                            <button class="btn-speed" onclick="setSimSpeed(10)" data-speed="10">10×</button>
+                            <button class="btn-speed" onclick="setSimSpeed(50)" data-speed="50">50×</button>
+                            <button class="btn-speed" onclick="setSimSpeed(100)" data-speed="100">100×</button>
+                        </div>
+                    </div>
+                    <div class="speed-row">
+                        <label>Jump:</label>
+                        <div class="jump-buttons">
+                            <button class="btn-jump" onclick="timeJump(60)">+1m</button>
+                            <button class="btn-jump" onclick="timeJump(300)">+5m</button>
+                            <button class="btn-jump" onclick="timeJump(600)">+10m</button>
+                            <button class="btn-jump" onclick="timeJump(1800)">+30m</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fault Injection -->
+                <div class="panel-section">
+                    <h3>🔧 Fault Injection</h3>
+                    <p class="section-desc">Each fault exercises multiple sensors with real physics.</p>
+                    <div class="fault-types" id="fault-types">
+                        <!-- Built by JS -->
+                    </div>
+                    <div class="fault-controls-compact">
+                        <div class="control-row">
+                            <label>Module</label>
+                            <select id="fault-module">
+                                <option value="1">M1</option>
+                                <option value="2">M2</option>
+                                <option value="3">M3</option>
+                                <option value="4" selected>M4</option>
+                                <option value="5">M5</option>
+                                <option value="6">M6</option>
+                                <option value="7">M7</option>
+                                <option value="8">M8</option>
+                            </select>
+                            <label>Group</label>
+                            <select id="fault-group">
+                                <option value="1">G1</option>
+                                <option value="2">G2</option>
+                                <option value="3" selected>G3</option>
+                                <option value="4">G4</option>
+                                <option value="5">G5</option>
+                                <option value="6">G6</option>
+                                <option value="7">G7</option>
+                                <option value="8">G8</option>
+                                <option value="9">G9</option>
+                                <option value="10">G10</option>
+                                <option value="11">G11</option>
+                                <option value="12">G12</option>
+                                <option value="13">G13</option>
+                            </select>
+                        </div>
+                        <div class="control-row">
+                            <label>Severity: <span id="severity-val">1</span></label>
+                            <input type="range" id="fault-severity" min="0.1" max="1" step="0.1" value="1"
+                                oninput="document.getElementById('severity-val').textContent=this.value">
+                            <label>Dur (s)</label>
+                            <input type="number" id="fault-duration" value="0" min="0" style="width:50px">
+                        </div>
+                        <button class="btn-inject" onclick="injectFault()">⚡ Inject Fault</button>
+                    </div>
+                    <!-- Active Faults -->
+                    <div class="active-faults-box">
+                        <h4>Active Faults</h4>
+                        <div id="active-faults-list">
+                            <div class="no-faults">No active faults</div>
+                        </div>
+                        <button class="btn-clear-all" onclick="clearAllFaults()">🗑 Clear All</button>
+                    </div>
+                </div>
+
+                <!-- Reset -->
+                <div class="panel-section" style="text-align:center; padding:12px 0;">
+                    <button class="btn-reset" id="btn-reset" onclick="resetSystem()">🔄 Reset System to Normal</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ──── RIGHT PANEL: ALL SENSOR READINGS ──── -->
+        <div class="panel panel-sensors">
+            <div class="panel-header">📡 Sensor Readings
+                <span class="usb-badge-header">USB ↗ = sent to hardware</span>
+            </div>
+            <div class="panel-scroll">
+
+                <!-- Electrical -->
+                <div class="panel-section">
+                    <h3>⚡ Electrical</h3>
+                    <div class="sensor-grid">
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Pack Voltage</div>
+                            <div class="sensor-value" id="s-pack-v">—</div>
+                            <div class="sensor-unit">V</div>
+                            <div class="sensor-range">260 – 380V</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Pack Current</div>
+                            <div class="sensor-value" id="s-pack-i">—</div>
+                            <div class="sensor-unit">A</div>
+                            <div class="sensor-range">±315A</div>
+                        </div>
+                        <div class="sensor-tile">
+                            <div class="sensor-label">Pack Power</div>
+                            <div class="sensor-value" id="s-pack-p">—</div>
+                            <div class="sensor-unit">kW</div>
+                            <div class="sensor-range">Computed: V × I</div>
+                        </div>
+                        <div class="sensor-tile">
+                            <div class="sensor-label">V Spread</div>
+                            <div class="sensor-value" id="s-v-spread">—</div>
+                            <div class="sensor-unit">mV</div>
+                            <div class="sensor-range">Computed: max−min</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Isolation</div>
+                            <div class="sensor-value" id="s-isolation">—</div>
+                            <div class="sensor-unit">MΩ</div>
+                            <div class="sensor-range">&gt;500 normal</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Thermal -->
+                <div class="panel-section">
+                    <h3>🌡 Thermal (<span id="thermal-count">19</span> sensors)</h3>
+                    <div class="sensor-grid">
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Ambient NTC</div>
+                            <div class="sensor-value" id="s-ambient">—</div>
+                            <div class="sensor-unit">°C</div>
+                            <div class="sensor-range accent-cyan">BMS PCB</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Coolant In</div>
+                            <div class="sensor-value" id="s-cool-in">—</div>
+                            <div class="sensor-unit">°C</div>
+                            <div class="sensor-range accent-cyan">Inlet pipe</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Coolant Out</div>
+                            <div class="sensor-value" id="s-cool-out">—</div>
+                            <div class="sensor-unit">°C</div>
+                            <div class="sensor-range accent-cyan">Outlet pipe</div>
+                        </div>
+                        <div class="sensor-tile">
+                            <div class="sensor-label">Coolant ΔT</div>
+                            <div class="sensor-value" id="s-cool-dt">—</div>
+                            <div class="sensor-unit">°C</div>
+                            <div class="sensor-range">Computed</div>
+                        </div>
+                        <div class="sensor-tile">
+                            <div class="sensor-label">T Spread</div>
+                            <div class="sensor-value" id="s-t-spread">—</div>
+                            <div class="sensor-unit">°C</div>
+                            <div class="sensor-range">Computed</div>
+                        </div>
+                        <div class="sensor-tile">
+                            <div class="sensor-label">Max dT/dt</div>
+                            <div class="sensor-value" id="s-dtdt">—</div>
+                            <div class="sensor-unit">°C/min</div>
+                            <div class="sensor-range">Computed</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gas & Pressure -->
+                <div class="panel-section">
+                    <h3>💨 Gas & Pressure (2× BME680)</h3>
+                    <div class="sensor-grid">
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Gas 1 (VOC)</div>
+                            <div class="sensor-value" id="s-gas1">—</div>
+                            <div class="sensor-unit">ratio</div>
+                            <div class="sensor-range accent-cyan">Near M1-M2</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Gas 2 (VOC)</div>
+                            <div class="sensor-value" id="s-gas2">—</div>
+                            <div class="sensor-unit">ratio</div>
+                            <div class="sensor-range accent-cyan">Near M7-M8</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Pressure Δ1</div>
+                            <div class="sensor-value" id="s-p1">—</div>
+                            <div class="sensor-unit">hPa</div>
+                            <div class="sensor-range">±0.5 normal</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Pressure Δ2</div>
+                            <div class="sensor-value" id="s-p2">—</div>
+                            <div class="sensor-unit">hPa</div>
+                            <div class="sensor-range">±0.5 normal</div>
+                        </div>
+                        <div class="sensor-tile usb-input">
+                            <span class="usb-badge">USB ↗</span>
+                            <div class="sensor-label">Humidity</div>
+                            <div class="sensor-value" id="s-humidity">—</div>
+                            <div class="sensor-unit">%RH</div>
+                            <div class="sensor-range">30–60% normal</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Module Cards -->
+                <div class="panel-section">
+                    <h3>🔋 Modules & Groups
+                        <span class="usb-badge-header">USB ↗ All V + NTC readings</span>
+                    </h3>
+                    <p class="section-desc">8 modules × 13 groups × 8 cells | Click to expand</p>
+                    <div class="modules-grid" id="modules-grid">
+                        <!-- Built by JS -->
+                    </div>
+                    <div class="group-detail" id="group-detail" style="display:none;"></div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script src="/static/dashboard.js"></script>
+</body>
+
+</html>

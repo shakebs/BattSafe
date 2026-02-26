@@ -1,0 +1,8 @@
+t_ms,voltage_v,current_a,temp_c,dt_dt_max,gas_ratio,pressure_delta_hpa,swelling_pct,short_event,categories,state
+0,14.8,2.0,31.0,0.01,1.0,0.0,0.0,0,,NORMAL
+5000,14.7,2.2,31.5,0.02,0.99,0.1,0.0,0,,NORMAL
+10000,14.6,2.5,58.2,0.03,0.98,0.2,0.0,0,thermal,WARNING
+15000,14.5,2.7,59.0,0.04,0.55,0.8,0.0,0,gas|thermal,CRITICAL
+20000,14.3,3.0,61.0,0.05,0.42,8.7,0.0,0,gas|pressure|thermal,EMERGENCY
+25000,11.5,9.4,50.0,0.02,0.95,0.6,0.0,0,electrical,EMERGENCY
+30000,9.8,18.0,53.0,0.02,0.92,0.5,0.0,1,electrical,EMERGENCY
