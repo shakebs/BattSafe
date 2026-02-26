@@ -8,13 +8,26 @@ https://drive.google.com/file/d/1m627qJw2Xilpu_7p-FZGwTNUh165RZEK/view?usp=drive
 | --- | --- |
 | Theme | Theme 2: Thermal anomaly detection |
 | Compute Platform | VSDSquadron ULTRA (THEJAS32) |
-| Target Pack Model | 104S8P LFP reference architecture (832 cells) |
+| Pack Architecture Modeled | 104S8P LFP reference pack (832 cells) |
 | Active Sensor/Signal Channels | 139 |
 | Detection Categories | Electrical, Thermal, Gas, Pressure, Swelling |
+| Runtime Validation | Board-in-loop tested (twin -> board -> dashboard) |
 | Safety Action | Relay disconnect + alarm on emergency |
 
-## Problem Statement
-Conventional temperature-only protection reacts late in the thermal runaway chain. BattSafe improves response time by correlating electrical, thermal, gas, pressure, and swelling evidence at the edge before catastrophic escalation.
+## Sensor Count Summary (Current Architecture)
+| Sensor/Channel Group | Count |
+| --- | ---: |
+| Parallel-group voltage channels | 104 |
+| Pack voltage | 1 |
+| Pack current | 1 |
+| Isolation | 1 |
+| Cell NTC channels | 16 |
+| Ambient + coolant temperature channels | 3 |
+| Gas channels | 2 |
+| Pressure channels | 2 |
+| Humidity channel | 1 |
+| Swelling channels | 8 |
+| **Total active channels** | **139** |
 
 ## System Overview
 | Block | Implementation |
@@ -38,6 +51,13 @@ State policy:
 - `CRITICAL`: 2 categories active
 - `EMERGENCY`: 3+ categories, short-circuit, or direct emergency trigger
 
+## Hardware Cost (INR)
+- Full-pack architecture BOM: `2_Hardware/Bill_of_Materials.md`
+- Machine-readable BOM: `2_Hardware/Bill_of_Materials.csv`
+- Price source log: `2_Hardware/Cost_References_2026-02-26.md`
+- Estimated full architecture total (with industrial isolation monitor): **INR 83743.86**
+- Estimated full architecture total (without industrial isolation monitor): **INR 38386.86**
+
 ## Validation Snapshot
 | Test Case | Expected Behavior | Result |
 | --- | --- | --- |
@@ -46,32 +66,29 @@ State policy:
 | Dual anomaly | Escalate to `CRITICAL` | Pass |
 | Triple anomaly | Immediate `EMERGENCY` | Pass |
 | Fast short-circuit | Emergency bypass path | Pass |
-
-## Hardware Cost (INR)
-- Detailed BOM (table): `2_Hardware/Bill_of_Materials.md`
-- Raw BOM (CSV): `2_Hardware/Bill_of_Materials.csv`
-- Estimated prototype total: **INR 2824**
+| Board-in-loop run | Firmware executes on board and returns telemetry over UART | Pass |
 
 ## Repository Guide
 | Path | Contents |
 | --- | --- |
 | `1_Project_Overview/` | Problem statement, architecture, block diagram |
-| `2_Hardware/` | BOM, circuit diagram, pin mapping, safety checklist |
+| `2_Hardware/` | BOM, cost references, circuit diagram, pin mapping, safety checklist |
 | `3_Firmware/` | Embedded C firmware, drivers, target tools, tests |
 | `4_Algorithms/` | Sampling, filtering, detection logic, edge architecture |
 | `5_Data/` | Raw/processed/fault CSV data and data format |
 | `6_Validation/` | Test cases, calibration method, results, error analysis |
 | `7_Demo/` | Video link, runbook, dashboard, digital twin |
 | `8_Future_Scope/` | Scale-up strategy |
-| `archive/reference_docs/` | Archived planning/reference docs (non-submission core) |
+| `archive/reference_docs/` | Archived planning/reference docs |
 
-## Quick Start (Software-Only)
+## Quick Start (Board-In-Loop)
 ```powershell
-python -m unittest discover -s 7_Demo\dashboard\tests -v
-python 3_Firmware\tests\correlation_sim.py
-python 7_Demo\dashboard\src\server.py --sim --host 127.0.0.1 --web-port 5000
+# Terminal 1
+python -m digital_twin.main --no-serial
+
+# Terminal 2
+python 7_Demo\dashboard\src\server.py --twin-bridge --port COM5 --host 127.0.0.1 --web-port 5000 --twin-url http://127.0.0.1:5001
 ```
 
-
-
-
+Board build/flash instructions:
+- `3_Firmware/Build_Instructions.md`

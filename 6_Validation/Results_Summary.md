@@ -2,7 +2,9 @@
 
 ## Scope
 
-Results below are from the current reproducible simulation track and firmware unit tests in this repository.
+Validation in this repository includes both:
+- host-side firmware logic tests
+- board-in-loop execution on VSDSquadron ULTRA using twin-fed input over UART
 
 ## Result Table
 
@@ -16,9 +18,10 @@ Results below are from the current reproducible simulation track and firmware un
 | T6 | Pass | Short-circuit path triggered direct emergency | `3_Firmware/tests/test_main.c` |
 | T7 | Pass | Emergency latch held until recovery window conditions were met | `3_Firmware/tests/test_main.c` |
 | T8 | Pass | Ambient compensation changed decision for identical cell temperature | `3_Firmware/tests/test_main.c` |
+| T9 | Pass | Board path executed full detection loop and streamed telemetry to dashboard | `3_Firmware/Build_Instructions.md`, `7_Demo/Hardware_Handoff_Runbook.md` |
 
-## Honest Status
+## Current Status
 
-- Current submission evidence is simulation and software-in-the-loop focused.
-- Firmware, state machine, and telemetry are ready for board path.
-- Full live-sensor hardware evidence can be expanded in next iteration.
+- Firmware anomaly and correlation engine are board-runnable and tested in board-in-loop mode.
+- Dashboard and twin-bridge pipeline validate real board telemetry flow.
+- Additional physical-sensor expansion can be layered on top of this board-validated baseline.
