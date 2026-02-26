@@ -33,8 +33,8 @@ class SensorReading:
     """One snapshot of all sensor values at a point in time.
     
     Full-pack edition: carries data for 8 modules (16 NTCs, 104 groups)
-    plus pack-level sensors. Legacy 4-cell fields still present for
-    backward compat with the existing dashboard frontend.
+    plus pack-level sensors. Compact compatibility fields are retained
+    for frontend paths that still consume summarized values.
     """
     timestamp_ms: int       # milliseconds since boot
     
@@ -43,19 +43,19 @@ class SensorReading:
     current_a: float        # pack current in amps
     r_internal_mohm: float  # group internal resistance in milliohms
     
-    # Legacy Thermal (kept for backward compat — first 4 module NTC1s)
+    # Compatibility thermal fields (first 4 module NTC1 values)
     temp_cell1_c: float     # Module 1 NTC1
     temp_cell2_c: float     # Module 2 NTC1
     temp_cell3_c: float     # Module 3 NTC1
     temp_cell4_c: float     # Module 4 NTC1
     temp_ambient_c: float   # ambient temperature
     
-    # Gas & Pressure — single-value legacy (worst-case of dual sensors)
+    # Gas & pressure summarized values (worst-case of dual sensors)
     gas_ratio: float        # min(gas1, gas2)
     pressure_delta_hpa: float  # max(p1, p2)
     humidity_pct: float
     
-    # Mechanical — single-value legacy (max across 8 modules)
+    # Mechanical summarized value (max across 8 modules)
     swelling_pct: float
     
     # Derived flags
@@ -146,7 +146,7 @@ def evaluate_categories(reading: SensorReading) -> list:
         reading.r_internal_mohm > THRESHOLDS["r_int_warning_mohm"]):
         cats.append("electrical")
     
-    # Thermal: check NTCs from modules if available, else legacy
+    # Thermal: check NTCs from modules if available, else summarized fields
     all_ntcs = []
     if reading.modules:
         for m in reading.modules:

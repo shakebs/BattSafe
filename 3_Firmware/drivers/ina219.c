@@ -10,8 +10,8 @@
  * ----------------------------------------------------------------------- */
 #if HAL_HOST_MODE
 
-static float sim_voltage = 14.8f;
-static float sim_current = 2.0f;
+static float sim_voltage = 332.8f;
+static float sim_current = 60.0f;
 
 hal_status_t ina219_init(void) { return HAL_OK; }
 
@@ -22,8 +22,8 @@ hal_status_t ina219_read(ina219_reading_t *r) {
 
   /* Compute internal resistance: R = V_drop / I
    * V_drop = V_nominal - V_measured
-   * For a 4S pack, nominal is ~16.8V fully charged */
-  float v_drop = 16.8f - sim_voltage;
+   * Full-pack nominal reference is ~332.8V (104S8P LFP) */
+  float v_drop = 332.8f - sim_voltage;
   if (sim_current > 0.1f) {
     r->r_internal_mohm = (v_drop / sim_current) * 1000.0f;
   } else {
@@ -45,7 +45,7 @@ void ina219_sim_set(float voltage_v, float current_a) {
 
 hal_status_t ina219_init(void) {
   /* TODO: Write configuration register
-   * Recommended config for 4S battery monitoring:
+   * Example config for bench mirror-channel monitoring:
    *   - Bus voltage range: 16V (BRNG = 0)
    *   - Shunt voltage range: ±160mV (PGA = /4)
    *   - ADC resolution: 12-bit
@@ -94,7 +94,7 @@ hal_status_t ina219_read(ina219_reading_t *r) {
   r->power_w = r->voltage_v * r->current_a;
 
   /* Internal resistance estimate */
-  float v_drop = 16.8f - r->voltage_v;
+  float v_drop = 332.8f - r->voltage_v;
   if (r->current_a > 0.1f) {
     r->r_internal_mohm = (v_drop / r->current_a) * 1000.0f;
   } else {

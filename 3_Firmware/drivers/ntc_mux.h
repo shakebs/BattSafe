@@ -1,8 +1,9 @@
 /*
  * ntc_mux.h — NTC Thermistor Array via CD4051 MUX
  *
- * Reads 4 cell temperatures + 1 ambient temperature using
- * NTC thermistors connected through an analog multiplexer.
+ * Bench compatibility driver for a subset of NTC channels using
+ * an analog multiplexer. The full 104S8P architecture is handled
+ * in the pack-level snapshot pipeline (`main` + `anomaly_eval`).
  *
  * How it works:
  *   1. Set MUX channel select pins (S0, S1, S2) via GPIO
@@ -19,7 +20,7 @@
 
 /* Number of thermistors */
 #define NTC_NUM_CELLS 4
-#define NTC_NUM_CHANNELS 5 /* 4 cells + 1 ambient */
+#define NTC_NUM_CHANNELS 5 /* 4 representative thermal points + 1 ambient */
 
 /* MUX channel assignments */
 #define NTC_MUX_CH_CELL1 0
@@ -36,10 +37,10 @@
 
 /* Temperature readings */
 typedef struct {
-  float cell_temps_c[NTC_NUM_CELLS]; /* Cell surface temperatures */
+  float cell_temps_c[NTC_NUM_CELLS]; /* Representative thermal points */
   float ambient_c;                   /* Ambient temperature */
-  float max_temp_c;                  /* Highest cell temperature */
-  float max_delta_c;                 /* Max cell-to-cell difference */
+  float max_temp_c;                  /* Highest measured point */
+  float max_delta_c;                 /* Max point-to-point difference */
   float dt_dt_max;                   /* Max rate of change (°C/s) */
 } ntc_reading_t;
 

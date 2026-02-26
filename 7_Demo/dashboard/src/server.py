@@ -706,7 +706,7 @@ def main():
     parser.add_argument(
         "--sim",
         action="store_true",
-        help="Alias for --virtual-board (legacy flag)",
+        help="Alias for --virtual-board (compatibility flag)",
     )
     parser.add_argument("--twin-bridge", action="store_true", help="Digital twin → board → dashboard")
     parser.add_argument("--twin-url", type=str, default="http://127.0.0.1:5001",

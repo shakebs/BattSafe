@@ -7,7 +7,7 @@
 #include "../hal/hal_gpio.h"
 #include <math.h>
 
-/* Previous reading for dT/dt computation */
+/* Previous reading for dT/dt computation (compat subset channels) */
 static float prev_temps[NTC_NUM_CELLS] = {25.0f, 25.0f, 25.0f, 25.0f};
 static bool first_reading = true;
 
@@ -54,7 +54,7 @@ hal_status_t ntc_mux_init(void) {
 }
 
 hal_status_t ntc_mux_read_all(ntc_reading_t *r) {
-  /* Copy simulated temperatures */
+  /* Copy simulated subset channels */
   for (int i = 0; i < NTC_NUM_CELLS; i++) {
     r->cell_temps_c[i] = sim_temps[i];
   }
@@ -68,7 +68,7 @@ hal_status_t ntc_mux_read_all(ntc_reading_t *r) {
     }
   }
 
-  /* Find max cell-to-cell difference */
+  /* Find max point-to-point difference */
   float min_temp = r->cell_temps_c[0];
   for (int i = 1; i < NTC_NUM_CELLS; i++) {
     if (r->cell_temps_c[i] < min_temp)
@@ -114,7 +114,7 @@ hal_status_t ntc_mux_init(void) {
 }
 
 hal_status_t ntc_mux_read_all(ntc_reading_t *r) {
-  /* Read each thermistor by selecting the MUX channel */
+  /* Read each configured subset thermistor channel via MUX */
   for (uint8_t ch = 0; ch < NTC_NUM_CHANNELS; ch++) {
     /* Set MUX channel */
     hal_gpio_mux_select(ch);

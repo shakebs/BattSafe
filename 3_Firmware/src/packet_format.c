@@ -166,7 +166,7 @@ uint8_t packet_encode_module(telemetry_module_frame_t *pkt,
 }
 
 /* -----------------------------------------------------------------------
- * Legacy API (backward compat for tests)
+ * Compatibility API (test/fallback path)
  * ----------------------------------------------------------------------- */
 
 uint8_t packet_encode(telemetry_packet_t *pkt, uint32_t timestamp_ms,

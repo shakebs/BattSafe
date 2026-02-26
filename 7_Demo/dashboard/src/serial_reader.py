@@ -115,19 +115,19 @@ class BoardReading:
     # Per-module data
     module_data: List[dict] = field(default_factory=list)
 
-    # Legacy compat (first 4 module NTCs)
+    # UI compatibility fields (first 4 module NTC1 values)
     temp_cell1_c: float = 25.0
     temp_cell2_c: float = 25.0
     temp_cell3_c: float = 25.0
     temp_cell4_c: float = 25.0
 
-    # Legacy compat single-value
+    # UI compatibility single-value fields
     gas_ratio: float = 1.0
     pressure_delta_hpa: float = 0.0
     swelling_pct: float = 0.0
 
-    def update_legacy_compat(self):
-        """Fill in legacy 4-cell fields from module data."""
+    def update_ui_compat(self):
+        """Populate UI compatibility fields from full module data."""
         if len(self.module_data) > 0:
             self.temp_cell1_c = self.module_data[0].get('ntc1', 25.0)
         if len(self.module_data) > 1:
@@ -401,7 +401,7 @@ class SerialReader:
             else:
                 r.module_data.append(ModuleReading(module_index=i).to_dict())
 
-        r.update_legacy_compat()
+        r.update_ui_compat()
 
         self._last_reading = r
         return r

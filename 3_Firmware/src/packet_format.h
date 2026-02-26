@@ -134,7 +134,7 @@ uint8_t packet_checksum(const uint8_t *data, uint8_t length);
 /* Validate a received pack frame (check sync byte and checksum) */
 int packet_validate_pack(const telemetry_pack_frame_t *pkt);
 
-/* Legacy API — encode pack frame (backward compat for tests) */
+/* Compatibility API — encode pack frame (test/fallback path) */
 uint8_t packet_encode(telemetry_packet_t *pkt, uint32_t timestamp_ms,
                       const sensor_snapshot_t *sensors,
                       const anomaly_result_t *anomaly, system_state_t state);

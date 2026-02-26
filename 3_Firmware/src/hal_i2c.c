@@ -83,9 +83,12 @@ void hal_i2c_sim_set_reg(uint8_t addr, uint8_t reg, const uint8_t *data,
 #else
 
 /*
- * TODO: Fill in when board arrives (Feb 19).
+ * Target I2C register integration placeholder.
  *
- * The THEJAS32 I2C controller is accessed via memory-mapped registers.
+ * The board-in-loop demo path can ingest twin-fed frames over UART.
+ * For direct sensor bus acquisition, map these calls to THEJAS32 I2C
+ * memory-mapped registers.
+ *
  * Typical initialization:
  *   1. Enable I2C clock in system control
  *   2. Set SCL frequency (100kHz or 400kHz)

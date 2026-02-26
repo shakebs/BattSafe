@@ -42,10 +42,10 @@ void hal_adc_sim_set(uint8_t channel, uint16_t raw_value) {
 #else
 
 /*
- * TODO: Fill in when board arrives (Feb 19).
+ * Target ADC register integration placeholder.
  *
- * The THEJAS32 ADC is accessed through memory-mapped registers.
- * You'll need the register addresses from the THEJAS32 datasheet.
+ * For direct on-board sensor acquisition (without twin-fed frames),
+ * map these calls to THEJAS32 memory-mapped ADC registers.
  *
  * Typical flow:
  *   1. Enable ADC clock

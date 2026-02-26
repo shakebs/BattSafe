@@ -2,8 +2,9 @@
  * ina219.h — INA219 Voltage/Current Sensor Driver
  *
  * The INA219 is an I2C-based high-side current and voltage sensor.
- * It measures the battery pack voltage and discharge current,
- * which lets us compute internal resistance (R_int).
+ * In this repository it is used as a bench/compatibility interface.
+ * Full-pack 104S8P logic uses pack snapshot channels in the runtime
+ * pipeline (`main` + `anomaly_eval`) and can map to isolated sensors.
  *
  * I2C Address: 0x40 (default, A0=A1=GND)
  */
@@ -24,7 +25,7 @@
 #define INA219_REG_CURRENT 0x04
 #define INA219_REG_CALIB 0x05
 
-/* Calibration values (for 0.1 ohm shunt resistor, ±3.2A range) */
+/* Calibration values for the configured shunt interface */
 #define INA219_SHUNT_RESISTOR_MOHM 100 /* 100 milliohms = 0.1 ohm */
 
 /* Readings */

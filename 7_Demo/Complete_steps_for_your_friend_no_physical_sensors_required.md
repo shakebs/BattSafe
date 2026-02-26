@@ -1,4 +1,4 @@
-# Complete steps for your friend (no physical sensors required)
+# Complete Board-in-Loop Setup Steps (no external sensor rig required)
 
 1. Open PowerShell at repo root.
 
@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File 7_Demo\run_twin_bridge.ps1 -BoardPort C
 - Input: `http://127.0.0.1:5001`
 - Output: `http://127.0.0.1:5000`
 
-9. Validation flow:
+9. Validation flow (board-tested path):
 - Inject fault in input dashboard -> output should escalate.
 - Click input `Reset System to Normal` -> output should return to `NORMAL` after recovery hold.
 - Click output `Reset` -> board logic restart + reevaluation.

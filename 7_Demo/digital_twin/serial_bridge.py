@@ -194,7 +194,7 @@ class SerialBridge:
         csum = _xor_checksum(frame_no_csum)
         return frame_no_csum + struct.pack('B', csum)
 
-    # Legacy API — encode old-style single packet (for backward compat)
+    # Compatibility API — encode compact single packet for fallback paths
     def encode_packet(self, snapshot: Dict) -> bytes:
         """Encode ALL frames for one snapshot cycle."""
         return self.encode_all_frames(snapshot)
