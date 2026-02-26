@@ -112,6 +112,39 @@ def parse_tel_line(line):
     }
 
 
+def _flatten_module_temps(modules):
+    """Extract module NTC temperatures as a flat list."""
+    temps = []
+    if not isinstance(modules, list):
+        return temps
+
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        t1 = m.get("ntc1")
+        t2 = m.get("ntc2")
+        if isinstance(t1, (int, float)):
+            temps.append(float(t1))
+        if isinstance(t2, (int, float)):
+            temps.append(float(t2))
+    return temps
+
+
+def _max_module_swelling(modules):
+    """Maximum module swelling percentage from module rows."""
+    max_swelling = 0.0
+    if not isinstance(modules, list):
+        return max_swelling
+
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        v = m.get("swelling_pct")
+        if isinstance(v, (int, float)):
+            max_swelling = max(max_swelling, float(v))
+    return max_swelling
+
+
 def reading_to_dict(r):
     """Convert SensorReading to dict for JSON (full-pack data)."""
     d = {
@@ -133,18 +166,10 @@ def reading_to_dict(r):
         "cascade_stage": getattr(r, 'cascade_stage', 'Normal'),
         "modules": getattr(r, 'modules', []),
     }
-    # Backward compat: generate temp_cells from module NTCs if available
     mods = getattr(r, 'modules', [])
-    if mods:
-        temps = []
-        for m in mods[:4]:
-            temps.append(m.get('ntc1', 25) if isinstance(m, dict) else 25)
-        d["temp_cells"] = temps
-    else:
-        d["temp_cells"] = [
-            getattr(r, 'temp_cell1_c', 25), getattr(r, 'temp_cell2_c', 25),
-            getattr(r, 'temp_cell3_c', 25), getattr(r, 'temp_cell4_c', 25),
-        ]
+    temps = _flatten_module_temps(mods)
+    d["module_ntc_points"] = temps
+    d["temp_cells"] = temps[:4] if temps else []
     return d
 
 
@@ -176,11 +201,14 @@ def board_reading_to_dict(r):
         "emergency_direct": getattr(r, 'emergency_direct', False),
         "modules": getattr(r, 'module_data', []),
     }
-    # Backward compat
-    d["temp_cells"] = [
-        getattr(r, 'temp_cell1_c', 25), getattr(r, 'temp_cell2_c', 25),
-        getattr(r, 'temp_cell3_c', 25), getattr(r, 'temp_cell4_c', 25),
-    ]
+    module_temps = r.module_ntc_values() if hasattr(r, "module_ntc_values") else _flatten_module_temps(d["modules"])
+    d["module_ntc_points"] = module_temps
+    d["temp_cells"] = module_temps[:4] if module_temps else []
+    d["swelling_pct"] = (
+        r.max_module_swelling_pct()
+        if hasattr(r, "max_module_swelling_pct")
+        else _max_module_swelling(d["modules"])
+    )
     return d
 
 

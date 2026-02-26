@@ -512,20 +512,50 @@ class BatteryDashboard:
 
 def _board_to_sensor_reading(board_reading, categories_fn) -> SensorReading:
     categories = categories_fn(board_reading.anomaly_mask)
+    modules = getattr(board_reading, "module_data", []) or []
+
+    module_temps = []
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        t1 = m.get("ntc1")
+        t2 = m.get("ntc2")
+        if isinstance(t1, (int, float)):
+            module_temps.append(float(t1))
+        if isinstance(t2, (int, float)):
+            module_temps.append(float(t2))
+
+    # Matplotlib dashboard expects 4 preview channels; derive from full module data.
+    while len(module_temps) < 4:
+        module_temps.append(getattr(board_reading, "max_temp_c", 25.0))
+
+    gas_ratio_1 = getattr(board_reading, "gas_ratio_1", 1.0)
+    gas_ratio_2 = getattr(board_reading, "gas_ratio_2", gas_ratio_1)
+    pressure_1 = getattr(board_reading, "pressure_delta_1_hpa", 0.0)
+    pressure_2 = getattr(board_reading, "pressure_delta_2_hpa", pressure_1)
+
+    swelling_pct = 0.0
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        v = m.get("swelling_pct")
+        if isinstance(v, (int, float)):
+            swelling_pct = max(swelling_pct, float(v))
+
     return SensorReading(
         timestamp_ms=board_reading.timestamp_ms,
         voltage_v=board_reading.voltage_v,
         current_a=board_reading.current_a,
         r_internal_mohm=board_reading.r_internal_mohm,
-        temp_cell1_c=board_reading.temp_cell1_c,
-        temp_cell2_c=board_reading.temp_cell2_c,
-        temp_cell3_c=board_reading.temp_cell3_c,
-        temp_cell4_c=board_reading.temp_cell4_c,
+        temp_cell1_c=module_temps[0],
+        temp_cell2_c=module_temps[1],
+        temp_cell3_c=module_temps[2],
+        temp_cell4_c=module_temps[3],
         temp_ambient_c=board_reading.temp_ambient_c,
-        gas_ratio=board_reading.gas_ratio,
-        pressure_delta_hpa=board_reading.pressure_delta_hpa,
+        gas_ratio=min(gas_ratio_1, gas_ratio_2),
+        pressure_delta_hpa=max(pressure_1, pressure_2),
         humidity_pct=45.0,
-        swelling_pct=board_reading.swelling_pct,
+        swelling_pct=swelling_pct,
         short_circuit=board_reading.current_a >= 15.0,
         dt_dt_max=board_reading.dt_dt_max,
         active_categories=categories,

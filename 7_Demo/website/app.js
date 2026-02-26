@@ -377,14 +377,28 @@ function buildLiveMetrics(payload) {
   const raw = payload?.raw_data && typeof payload.raw_data === "object" ? payload.raw_data : {};
   const profile = raw.temperature_profile && typeof raw.temperature_profile === "object" ? raw.temperature_profile : {};
   const dev = raw.deviation && typeof raw.deviation === "object" ? raw.deviation : {};
+  const modules = Array.isArray(payload?.modules) ? payload.modules : [];
+  const moduleTemps = [];
+  modules.forEach((m) => {
+    if (!m || typeof m !== "object") return;
+    const t1 = toFiniteNumber(m.ntc1);
+    const t2 = toFiniteNumber(m.ntc2);
+    if (t1 !== null) moduleTemps.push(t1);
+    if (t2 !== null) moduleTemps.push(t2);
+  });
+  const moduleTempMax = moduleTemps.length ? Math.max(...moduleTemps) : null;
+  const moduleTempMin = moduleTemps.length ? Math.min(...moduleTemps) : null;
+  const moduleTempAvg = moduleTemps.length
+    ? moduleTemps.reduce((sum, t) => sum + t, 0) / moduleTemps.length
+    : null;
 
   return {
     voltage: firstFinite([raw.pack_voltage, payload?.voltage_v], 0),
     current: firstFinite([raw.pack_current, payload?.current_a], 0),
-    tempHotspot: firstFinite([profile.hotspot_temp_c, raw.max_temp_c, payload?.max_temp], 25),
-    tempMax: firstFinite([profile.max_temp_c, raw.max_temp_c, payload?.max_temp], 25),
-    tempAvg: firstFinite([profile.avg_temp_c, raw.avg_temp_c], 25),
-    tempMin: firstFinite([profile.min_temp_c, raw.min_temp_c], 25),
+    tempHotspot: firstFinite([profile.hotspot_temp_c, raw.max_temp_c, moduleTempMax, payload?.max_temp], 25),
+    tempMax: firstFinite([profile.max_temp_c, raw.max_temp_c, moduleTempMax, payload?.max_temp], 25),
+    tempAvg: firstFinite([profile.avg_temp_c, raw.avg_temp_c, moduleTempAvg], 25),
+    tempMin: firstFinite([profile.min_temp_c, raw.min_temp_c, moduleTempMin], 25),
     ambient: firstFinite([profile.ambient_temp_c, raw.ambient_temp, payload?.temp_ambient], 25),
     gas: firstFinite([raw.gas_ratio_min, raw.gas_ratio_1, payload?.gas_ratio_1], 1),
     pressure: firstFinite([raw.pressure_delta_max, raw.pressure_delta_1, payload?.pressure_delta_1], 0),

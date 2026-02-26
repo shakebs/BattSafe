@@ -115,34 +115,30 @@ class BoardReading:
     # Per-module data
     module_data: List[dict] = field(default_factory=list)
 
-    # UI compatibility fields (first 4 module NTC1 values)
-    temp_cell1_c: float = 25.0
-    temp_cell2_c: float = 25.0
-    temp_cell3_c: float = 25.0
-    temp_cell4_c: float = 25.0
+    def module_ntc_values(self) -> List[float]:
+        """Flatten all module NTC temperatures as [m1_ntc1, m1_ntc2, ...]."""
+        vals: List[float] = []
+        for m in self.module_data:
+            if not isinstance(m, dict):
+                continue
+            t1 = m.get('ntc1')
+            t2 = m.get('ntc2')
+            if isinstance(t1, (int, float)):
+                vals.append(float(t1))
+            if isinstance(t2, (int, float)):
+                vals.append(float(t2))
+        return vals
 
-    # UI compatibility single-value fields
-    gas_ratio: float = 1.0
-    pressure_delta_hpa: float = 0.0
-    swelling_pct: float = 0.0
-
-    def update_ui_compat(self):
-        """Populate UI compatibility fields from full module data."""
-        if len(self.module_data) > 0:
-            self.temp_cell1_c = self.module_data[0].get('ntc1', 25.0)
-        if len(self.module_data) > 1:
-            self.temp_cell2_c = self.module_data[1].get('ntc1', 25.0)
-        if len(self.module_data) > 2:
-            self.temp_cell3_c = self.module_data[2].get('ntc1', 25.0)
-        if len(self.module_data) > 3:
-            self.temp_cell4_c = self.module_data[3].get('ntc1', 25.0)
-
-        self.gas_ratio = min(self.gas_ratio_1, self.gas_ratio_2)
-        self.pressure_delta_hpa = max(self.pressure_delta_1_hpa,
-                                       self.pressure_delta_2_hpa)
-        if self.module_data:
-            self.swelling_pct = max(m.get('swelling_pct', 0)
-                                    for m in self.module_data)
+    def max_module_swelling_pct(self) -> float:
+        """Maximum swelling across available module rows."""
+        max_swelling = 0.0
+        for m in self.module_data:
+            if not isinstance(m, dict):
+                continue
+            v = m.get('swelling_pct')
+            if isinstance(v, (int, float)):
+                max_swelling = max(max_swelling, float(v))
+        return max_swelling
 
 
 def find_board_port() -> Optional[str]:
@@ -400,8 +396,6 @@ class SerialReader:
                 r.module_data.append(self._module_frames[i].to_dict())
             else:
                 r.module_data.append(ModuleReading(module_index=i).to_dict())
-
-        r.update_ui_compat()
 
         self._last_reading = r
         return r
