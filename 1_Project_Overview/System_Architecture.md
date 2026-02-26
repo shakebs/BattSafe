@@ -1,54 +1,45 @@
-# System Architecture (Prototype Round)
+﻿# System Architecture
 
-## Scope
+## End-to-End Runtime Flow
+| Step | Module | Output |
+| --- | --- | --- |
+| 1 | Input stream from digital twin or sensors | Full pack snapshot (139 channels) |
+| 2 | `3_Firmware/src/main.c` scheduler | Fast/medium/slow loop execution |
+| 3 | `3_Firmware/src/anomaly_eval.c` | Active anomaly categories and derived metrics |
+| 4 | `3_Firmware/src/correlation_engine.c` | `NORMAL` / `WARNING` / `CRITICAL` / `EMERGENCY` |
+| 5 | Safety output control | Relay, buzzer, status LED actions |
+| 6 | `3_Firmware/src/packet_format.c` | UART telemetry frames |
+| 7 | `7_Demo/dashboard/src/server.py` | Live visualization and logs |
 
-This prototype implements the proposal-v2 safety logic on VSDSquadron ULTRA using simulated sensor inputs in firmware, with the same data flow and interfaces that real sensors will use.
+## Loop Design
+| Loop | Normal Period | Alert Period | Purpose |
+| --- | --- | --- | --- |
+| Fast | 100 ms | 20 ms | Rapid electrical and short-circuit checks |
+| Medium | 500 ms | 100 ms | Category evaluation and state transitions |
+| Slow | 5000 ms | 1000 ms | Pack and module telemetry transmission |
 
-## End-to-End Flow
+## Runtime Block Diagram
+```text
+Digital Twin / Sensors
+        |
+        v
+[Input Frames / HAL]
+        |
+        v
+[Fast Loop] -> [Medium Loop] -> [Correlation Engine]
+                                |            |
+                                |            +-> [Safety Outputs]
+                                v
+                          [Slow Loop Telemetry]
+                                |
+                                v
+                          [Dashboard + Logs]
+```
 
-1. Sensor snapshot is produced each scheduler cycle.
-2. `anomaly_eval` converts raw readings into a 5-category anomaly bitmask.
-3. `correlation_engine` maps active category count to state:
-   - `NORMAL` (0)
-   - `WARNING` (1)
-   - `CRITICAL` (2)
-   - `EMERGENCY` (3+ or short-circuit)
-4. Safety outputs are driven by state (LED/buzzer and relay disconnect in emergency).
-5. A fixed 32-byte telemetry packet is emitted on UART.
-6. Dashboard visualizes electrical, thermal, gas/pressure, and state history.
-
-## Scheduler Design
-
-The firmware uses a 3-speed cooperative scheduler:
-
-- Normal mode:
-  - Fast loop: 100 ms
-  - Medium loop: 500 ms
-  - Slow loop: 5000 ms
-- Alert mode (any anomaly/state above normal):
-  - Fast loop: 20 ms
-  - Medium loop: 100 ms
-  - Slow loop: 1000 ms
-
-This keeps baseline compute usage low and increases resolution only during events.
-
-## Firmware Modules
-
-- `/Users/mohammedomer/Docs/EV/firmware/app/main.c`
-  - Scheduler, simulation input injection, control loop coordination.
-- `/Users/mohammedomer/Docs/EV/firmware/core/anomaly_eval.c`
-  - Category-level anomaly detection thresholds and bitmask generation.
-- `/Users/mohammedomer/Docs/EV/firmware/core/correlation_engine.c`
-  - State-machine transitions, countdown behavior, emergency latch.
-- `/Users/mohammedomer/Docs/EV/firmware/app/packet_format.c`
-  - 32-byte UART packet encoding/checksum.
-
-## Dashboard Modes
-
-- `--sim`: replay full 7-scenario synthetic run.
-- `--serial`: parse live board UART packets.
-- `--csv FILE`: replay previously logged data.
-
-## Current Limitation
-
-Physical sensors are not connected in this round, so firmware input comes from deterministic simulation profiles. Driver interfaces are kept in the repo for hardware integration in the next phase.
+## Core Implementation Files
+- `3_Firmware/src/main.c`
+- `3_Firmware/src/anomaly_eval.c`
+- `3_Firmware/src/correlation_engine.c`
+- `3_Firmware/src/packet_format.c`
+- `7_Demo/dashboard/src/server.py`
+- `7_Demo/digital_twin/main.py`

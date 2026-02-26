@@ -1,39 +1,23 @@
-# Prototype Validation Test Plan
+﻿# Validation Test Cases
 
-## Objective
+Validation is run against the same firmware logic used in deployment (`anomaly_eval` + `correlation_engine`).
 
-Demonstrate that multi-modal correlation improves safety and reduces false positives.
+## Core Cases
 
-## Test Matrix
+| ID | Test Case | Stimulus | Expected Outcome |
+| --- | --- | --- | --- |
+| T1 | Normal baseline | Nominal pack conditions | Stay in `NORMAL` |
+| T2 | Thermal-only anomaly | Local hotspot in one module | `WARNING` only |
+| T3 | Gas-only anomaly | Gas ratio drop without thermal rise | `WARNING` only |
+| T4 | Dual anomaly | Thermal + gas | `CRITICAL` |
+| T5 | Triple anomaly | Thermal + gas + pressure | Immediate `EMERGENCY` |
+| T6 | Fast electrical fault | Short-circuit signature | Immediate `EMERGENCY` bypass |
+| T7 | Emergency recovery behavior | Return to nominal after emergency | Latch holds, then controlled release |
+| T8 | Ambient compensation | Same cell temp with different ambient values | Different decisions (`WARNING` vs normal) |
 
-| ID | Test | Stimulus | Expected Result | Evidence |
-|---|---|---|---|---|
-| T1 | Normal stability | No fault injection for 20+ min | State remains `NORMAL` | CSV log + short video |
-| T2 | Thermal-only anomaly | Local heat input on one cell | `WARNING` only, no emergency | Dashboard video + state log |
-| T3 | Gas-only anomaly | IPA vapor near BME680 | Gas flag active; no forced emergency if single mode | Sensor log |
-| T4 | Pressure-only anomaly | Controlled pressure rise in enclosure | Pressure anomaly flag set | Sensor log |
-| T5 | Dual anomaly | Heat + gas combined | State escalates to `CRITICAL` then policy action | Video + CSV + transition timestamps |
-| T6 | Multi anomaly | Heat + gas + pressure | `EMERGENCY`, relay disconnect | Video + relay proof |
-| T7 | Electrical fast event | Load step / short-circuit simulation | Fast-loop response under 100 ms path | Timing log |
-| T8 | Recovery behavior | Remove fault conditions | Expected de-escalation behavior or latch rule | State trace |
+## Evidence Sources
 
-## Logging Format
-
-Each record should include:
-
-1. Timestamp (ms)
-2. Pack voltage/current
-3. Cell temperature summary (max, mean, dT/dt)
-4. Gas ratio
-5. Pressure delta
-6. Swelling estimate
-7. Active anomaly bitmask
-8. State
-9. Relay state
-
-## Acceptance Criteria
-
-1. Single-mode disturbances do not directly trigger emergency cutoff
-2. Correlated multi-mode events trigger escalation correctly
-3. Emergency action path is deterministic and logged
-4. Demo flow is repeatable with clear evidence
+- `3_Firmware/tests/test_main.c`
+- `5_Data/logs/sim_transition_log.csv`
+- `5_Data/Raw_Data_Sample.csv`
+- `5_Data/Processed_Data_Output.csv`

@@ -1,0 +1,9 @@
+﻿test_id,scenario,input_signature,expected_state,observed_state,pass
+T1,Normal operation,Baseline electrical+thermal+gas+pressure,NORMAL,NORMAL,1
+T2,Thermal only,Module hotspot with no gas or pressure,WARNING,WARNING,1
+T3,Gas only,Gas ratio drop with nominal thermal,WARNING,WARNING,1
+T4,Thermal + gas,Concurrent thermal and gas anomalies,CRITICAL,CRITICAL,1
+T5,Thermal + gas + pressure,Three independent categories,EMERGENCY,EMERGENCY,1
+T6,Short circuit,Current spike + short flag,EMERGENCY,EMERGENCY,1
+T7,Recovery hold,Inputs return nominal after emergency,EMERGENCY_latched,EMERGENCY_latched,1
+T8,Ambient compensation,45C cell temp at 25C vs 38C ambient,WARNING_then_NORMAL,WARNING_then_NORMAL,1

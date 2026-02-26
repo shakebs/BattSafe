@@ -1,70 +1,43 @@
-# Hardware Safety Checklist (Before Live EV Demo)
+﻿# Hardware Safety Checklist
 
-Use this checklist before connecting real sensors, cells, or load hardware.
+Use this checklist before connecting live cells or running fault-injection demos.
 
-## 1) Power and Voltage Domains
+## 1) Power Domain and Electrical Limits
 
-- Keep all THEJAS32 GPIO/I2C/UART/SPI signals in the 3.3V domain only.
-- Do not apply 5V directly to any THEJAS32 I/O pin.
-- Maintain board rails within datasheet ranges:
-  - VDD (core): 1.08V to 1.32V operating range
-  - VDDIO (I/O): 2.97V to 3.63V operating range
-- Never exceed absolute limits:
-  - VDD <= 1.5V
-  - VDDIO <= 3.9V
+- Keep MCU I/O in 3.3V domain only.
+- Never apply 5V directly to THEJAS32 GPIO.
+- Verify board supply rails are within datasheet limits.
+- Add fuse or current-limited supply during bench bring-up.
 
-## 2) GPIO Current and Driver Protection
+## 2) Driver and Protection
 
-- Do not drive relay coils or buzzers directly from MCU pins.
-- Use a transistor/MOSFET driver stage for relay and buzzer outputs.
-- Add a flyback diode across relay coils.
-- Respect I/O current limits (datasheet):
-  - 8mA per I/O for I2C/PWM/UART-class pins
-  - 12mA per I/O for PROC_HB/GPIO/SPI-class pins
+- Use transistor or MOSFET stage for relay and buzzer.
+- Add flyback diode for relay coils.
+- Verify relay defaults to open (disconnect) on boot.
+- Keep emergency path independent from UI/dashboard path.
 
-## 3) Boot and Fault Safety Behavior
+## 3) Wiring and Grounding
 
-- Relay must default to OPEN (battery disconnected) at boot.
-- Allow manual/explicit enable to close relay only after sanity checks.
-- Verify emergency path always forces relay OPEN.
-- Verify emergency latch requires deliberate reset/acknowledgment.
+- Confirm common ground across controller and sensors.
+- Keep analog lines away from high-current switching traces.
+- Validate polarity for INA219 and sensor connectors.
+- Ensure I2C pull-ups are to 3.3V.
 
-## 4) Sensor and Bus Wiring
+## 4) Thermal and Mechanical Safety
 
-- I2C pull-ups must be tied to 3.3V (not 5V).
-- Confirm shared ground between controller, sensors, and power stage.
-- Verify polarity and orientation for INA219, BME680, and ADC inputs.
-- Keep analog sensor lines away from switching/high-current wiring.
+- Isolate heat source from controller PCB.
+- Secure cells and wiring to prevent shorts from vibration.
+- Keep extinguisher and PPE available during tests.
 
-## 5) Pack and High-Current Path
+## 5) Pre-Demo Functional Checks
 
-- Use fuse/current limiting on battery input during bench testing.
-- Keep contactor/relay current rating above worst-case pack current.
-- Use proper wire gauge and insulated terminals for pack path.
-- Keep high-current return path physically separated from logic ground where possible.
+- Confirm state transitions in safe simulated mode first.
+- Confirm relay disconnect action on emergency condition.
+- Confirm UART telemetry is decoded correctly by dashboard.
+- Confirm no component exceeds safe temperature during dry run.
 
-## 6) Thermal and Physical Safety
+## Datasheet References
 
-- Keep board operating environment within 0C to +70C.
-- Keep hot-cell/heat-gun region physically isolated from controller board.
-- Mount sensors and relay so accidental shorting is not possible.
-- Keep Class C fire extinguisher and insulated gloves available during tests.
-
-## 7) ESD and Handling
-
-- Use ESD-safe handling during wiring/rework.
-- Power down and discharge before rewiring.
-- Avoid touching exposed pins while powered.
-
-## 8) Pre-Demo Quick Checks
-
-- Confirm relay logic with no battery connected first.
-- Confirm `NORMAL -> WARNING -> CRITICAL -> EMERGENCY` transitions on simulation.
-- Confirm UART telemetry packets decode correctly in dashboard.
-- Confirm no component exceeds safe touch temperature before live test.
-
-## Datasheet Sources
-
-- `/Users/mohammedomer/Docs/EV/THEJAS32_Datasheet.pdf` (electrical limits, current, temperature, I/O characteristics)
-- `/Users/mohammedomer/Docs/EV/datasheet_ultra.pdf` (board-level interface/power overview)
-- `/Users/mohammedomer/Docs/EV/DS-VEGA_ET1031 V1.0.pdf` (core architecture context)
+- `2_Hardware/Sensor_Datasheets/datasheet_ultra.pdf`
+- `2_Hardware/Sensor_Datasheets/DS-VEGA_ET1031 V1.0.pdf`
+- `2_Hardware/Sensor_Datasheets/THEJAS32_Datasheet.pdf`

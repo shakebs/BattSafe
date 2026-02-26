@@ -1,0 +1,13 @@
+﻿timestamp_ms,active_categories,state,risk_pct,hotspot_module,cascade_stage,action
+0,0,NORMAL,0,1,Normal,None
+30000,0,NORMAL,3,3,Normal,None
+45000,1,WARNING,18,3,Elevated,Increase_sampling
+70000,1,WARNING,22,3,Elevated,Increase_sampling
+100000,2,CRITICAL,46,5,SEI_Decomp,Critical_countdown
+120000,3,EMERGENCY,78,5,Separator,Relay_disconnect
+140000,4,EMERGENCY,90,5,Electrolyte,Relay_disconnect
+150000,5,EMERGENCY,100,5,RUNAWAY,Relay_disconnect
+170000,2,EMERGENCY,65,5,SEI_Decomp,Emergency_latched
+185000,1,WARNING,24,1,Elevated,Ambient_comp_check
+200000,0,NORMAL,7,1,Normal,None
+215000,0,NORMAL,2,1,Normal,None

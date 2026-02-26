@@ -1,49 +1,77 @@
-# BattSafe: EV Battery Intelligence Challenge – Submission Template
+﻿# BattSafe: Intelligent Thermal Anomaly Detection (Theme 2)
 
-Submission Requirements:
-- Structured repository mandatory
-- One-page README summary required
-- Raw dataset required
-- Minimum three validation test cases required
-- Demo video (max 5 minutes) required
-- Explicit usage of VSDSquadron ULTRA mandatory
+## Demo Video
+https://drive.google.com/file/d/1m627qJw2Xilpu_7p-FZGwTNUh165RZEK/view?usp=drive_link
 
-### Project Title
-Edge-Intelligence Thermal Runaway Prevention Using Multi-Modal Sensor Fusion on VSDSquadron ULTRA
+## Project Snapshot
+| Item | Value |
+| --- | --- |
+| Theme | Theme 2: Thermal anomaly detection |
+| Compute Platform | VSDSquadron ULTRA (THEJAS32) |
+| Target Pack Model | 104S8P LFP reference architecture (832 cells) |
+| Active Sensor/Signal Channels | 139 |
+| Detection Categories | Electrical, Thermal, Gas, Pressure, Swelling |
+| Safety Action | Relay disconnect + alarm on emergency |
 
-### Theme Selected
-Theme 2: Intelligent Thermal Anomaly Detection
+## Problem Statement
+Conventional temperature-only protection reacts late in the thermal runaway chain. BattSafe improves response time by correlating electrical, thermal, gas, pressure, and swelling evidence at the edge before catastrophic escalation.
 
-## 1. Problem Statement
-Most Battery Management Systems (BMS) rely only on temperature sensors for thermal protection. By the time a temperature alarm fires, the battery is already seconds away from failure. Research shows that thermal runaway follows a predictable cascade—gas venting and pressure changes occur minutes before the temperature spike. Our system catches these earlier precursors at the edge, using a VSDSquadron ULTRA as a real-time multi-modal sensor fusion engine, to prevent thermal runaway, not just detect it.
+## System Overview
+| Block | Implementation |
+| --- | --- |
+| Firmware Core | `3_Firmware/src/main.c`, `anomaly_eval.c`, `correlation_engine.c` |
+| Data Path | Twin/sensors -> VSDSquadron -> UART telemetry -> dashboard |
+| Board Interfaces | ADC, I2C, UART, GPIO |
+| Dashboard | `7_Demo/dashboard/src/server.py` |
+| Digital Twin | `7_Demo/digital_twin/main.py` |
 
-## 2. System Overview
-- **Compute Platform:** VSDSquadron ULTRA (THEJAS32)
-- **Sensors Used:** NTC Thermistors (×5), Bosch BME680 (Gas/Pressure), INA219 (V/I), FSR402 (Swelling)
-- **Interfaces Used (ADC / I2C / SPI / UART / GPIO):** ADC, I2C, UART, GPIO
-- **Edge Processing Performed:** 3-speed monitoring loop, Correlation Engine mapping multi-modal anomalies
-- **Cloud / Dashboard (if applicable):** Local Python Dashboard for visualization and logging
+## What Runs on VSDSquadron ULTRA
+| Loop | Normal Rate | Alert Rate | Core Responsibility |
+| --- | --- | --- | --- |
+| Fast | 100 ms | 20 ms | Short-circuit and fast electrical checks |
+| Medium | 500 ms | 100 ms | Category detection + state transition |
+| Slow | 5000 ms | 1000 ms | Pack/module telemetry emission |
 
-## 3. What Runs on VSDSquadron ULTRA
-- **Sampling frequency:** Fast (10Hz), Medium (2Hz), Slow (0.2Hz) nested loops
-- **Signal conditioning:** MUX selection, baseline tracking
-- **Filtering method:** Moving average / anomaly delta thresholding
-- **Detection / estimation logic:** Multi-parameter consensus (1 category=Warning, 2=Critical, 3+=Emergency)
-- **Output generated:** Relay disconnect trigger, UART telemetry stream
+State policy:
+- `NORMAL`: 0 categories active
+- `WARNING`: 1 category active
+- `CRITICAL`: 2 categories active
+- `EMERGENCY`: 3+ categories, short-circuit, or direct emergency trigger
 
-## 5. Repository Guide
-- 1_Project_Overview → Architecture and block diagram
-- 2_Hardware → Circuit, BOM, pin mapping
-- 3_Firmware → Embedded implementation
-- 4_Algorithms → Signal processing and logic
-- 5_Data → Raw and processed datasets
-- 6_Validation → Testing methodology and results
-- 7_Demo → Video and hardware proof
+## Validation Snapshot
+| Test Case | Expected Behavior | Result |
+| --- | --- | --- |
+| Normal operation | Stay in `NORMAL` | Pass |
+| Single anomaly | Escalate only to `WARNING` | Pass |
+| Dual anomaly | Escalate to `CRITICAL` | Pass |
+| Triple anomaly | Immediate `EMERGENCY` | Pass |
+| Fast short-circuit | Emergency bypass path | Pass |
 
-## 6. Demo Video
-[Insert public video link here]
+## Hardware Cost (INR)
+- Detailed BOM (table): `2_Hardware/Bill_of_Materials.md`
+- Raw BOM (CSV): `2_Hardware/Bill_of_Materials.csv`
+- Estimated prototype total: **INR 2824**
 
-## 7. Hardware Deployment Quick Links
-- Firmware build + flash guide: `3_Firmware/Build_Instructions.md`
-- Friend handoff runbook: `7_Demo/Hardware_Handoff_Runbook.md`
-- One-command twin->board launcher: `7_Demo/run_twin_bridge.ps1`
+## Repository Guide
+| Path | Contents |
+| --- | --- |
+| `1_Project_Overview/` | Problem statement, architecture, block diagram |
+| `2_Hardware/` | BOM, circuit diagram, pin mapping, safety checklist |
+| `3_Firmware/` | Embedded C firmware, drivers, target tools, tests |
+| `4_Algorithms/` | Sampling, filtering, detection logic, edge architecture |
+| `5_Data/` | Raw/processed/fault CSV data and data format |
+| `6_Validation/` | Test cases, calibration method, results, error analysis |
+| `7_Demo/` | Video link, runbook, dashboard, digital twin |
+| `8_Future_Scope/` | Scale-up strategy |
+| `archive/reference_docs/` | Archived planning/reference docs (non-submission core) |
+
+## Quick Start (Software-Only)
+```powershell
+python -m unittest discover -s 7_Demo\dashboard\tests -v
+python 3_Firmware\tests\correlation_sim.py
+python 7_Demo\dashboard\src\server.py --sim --host 127.0.0.1 --web-port 5000
+```
+
+
+
+

@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Minimal log viewer for simulation and early hardware logs."""
 
 import csv
 from pathlib import Path
 
-LOG_PATH = Path("/Users/mohammedomer/Docs/EV/data/logs/sim_transition_log.csv")
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LOG_PATH = REPO_ROOT / "5_Data" / "logs" / "sim_transition_log.csv"
 
 
 def main() -> None:

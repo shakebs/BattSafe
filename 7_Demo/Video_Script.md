@@ -1,41 +1,36 @@
-# Prototype Demo Video Script (6-8 minutes)
+﻿# Demo Video Script (Max 5 Minutes)
 
-## Segment 1: Problem + Approach (0:00-0:30)
+## 0:00 - 0:30 Problem and Theme
 
-- Thermal runaway precursors appear before temperature spikes.
-- Our edge system correlates electrical, thermal, gas, pressure, and swelling signals.
+- Theme 2: thermal anomaly detection.
+- Explain why temperature-only protection is late.
+- State goal: early multi-signal detection on VSDSquadron ULTRA.
 
-## Segment 2: Hardware Overview (0:30-1:30)
+## 0:30 - 1:20 Architecture Walkthrough
 
-- Show VSDSquadron ULTRA, sensor wiring, relay path, and power setup.
-- Mention safety default (relay off/open on boot).
+- Show firmware loop structure (fast, medium, slow).
+- Show five anomaly categories and state machine.
+- Show emergency action path (relay disconnect).
 
-## Segment 3: Firmware Architecture (1:30-2:30)
+## 1:20 - 2:30 Live Demo: Normal then Single Anomaly
 
-- Explain fast/medium/slow loops.
-- Explain anomaly categories and state machine transitions.
+- Run baseline and show `NORMAL` stability.
+- Inject one disturbance (thermal or gas only).
+- Show controlled `WARNING` without emergency overreaction.
 
-## Segment 4: Normal Operation (2:30-3:15)
+## 2:30 - 3:40 Live Demo: Correlated Fault
 
-- Dashboard live stream in stable condition.
-- Confirm `NORMAL` state and baseline behavior.
+- Inject dual and triple anomalies.
+- Show `CRITICAL` then `EMERGENCY` transition.
+- Show alarm/disconnect behavior and telemetry evidence.
 
-## Segment 5: False-Positive Demonstration (3:15-4:15)
+## 3:40 - 4:30 Repository Proof
 
-- Inject single-mode fault (heat only or gas only).
-- Show it does not jump directly to emergency.
+- Show structure from `1_Project_Overview` to `8_Future_Scope`.
+- Open firmware detection files and validation results.
+- Show data samples used for evidence.
 
-## Segment 6: Multi-Modal Fault Demonstration (4:15-5:45)
+## 4:30 - 5:00 Close
 
-- Inject dual or triple anomalies.
-- Show `CRITICAL/EMERGENCY` transition and relay cutoff.
-
-## Segment 7: GitHub Repository Walkthrough (5:45-6:45)
-
-- Show firmware modules, dashboard, test plan, and test results.
-- Show reproducible run instructions.
-
-## Segment 8: Close (6:45-7:15)
-
-- Summary: edge-only safety logic, reduced false positives, real-time action.
-- Future scope: scaling and TinyML.
+- Summarize: edge-first, correlation-based, safety-focused.
+- Mention immediate next step: expanded hardware validation.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Host-side correlation engine simulation for rapid logic validation.
 
 This script does not require hardware. It helps verify state transitions before
@@ -177,7 +177,8 @@ def main() -> None:
         )
         prev_state = state
 
-    out_path = Path("/Users/mohammedomer/Docs/EV/data/logs/sim_transition_log.csv")
+    repo_root = Path(__file__).resolve().parents[2]
+    out_path = repo_root / "5_Data" / "logs" / "sim_transition_log.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(out_rows[0].keys()))
